@@ -830,6 +830,8 @@ sspectuser
       +------ responsable entrega
       +------ responsable disposición
 
+```
+
 # 10. Cardinalidades propuestas
 
 | Origen | Relación | Destino |
