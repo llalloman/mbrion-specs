@@ -19,8 +19,8 @@
 |---|---|
 | ID | `PEC-LF-DATA-001` |
 | Título | Modelo lógico de datos — Artículos encontrados y declarados perdidos |
-| Versión | `0.1.0` |
-| Estado | `BORRADOR` |
+| Versión | `1.0.0` |
+| Estado | `APPROVED` |
 | Autor | Mbrion / equipo PEC |
 | Fecha | `2026-09-30` |
 | Arquitectura relacionada | `PEC-LF-ARCH-001` |
@@ -103,7 +103,7 @@ Por lo tanto:
 
 ### DATA-P02 — Coincidencias
 
-**PROPUESTA / INFERIDO**
+**CONFIRMADO**
 
 La relación entre un reporte de pérdida y un artículo encontrado se representa mediante una entidad de asociación:
 
@@ -119,7 +119,7 @@ porque un artículo podría relacionarse con múltiples reportes candidatos y un
 
 ### DATA-P03 — Custodia
 
-**PROPUESTA / INFERIDO**
+**CONFIRMADO**
 
 El artículo encontrado mantiene una referencia al custodio/local actual para consulta rápida.
 
@@ -170,995 +170,248 @@ Estas capacidades deben reutilizarse o adaptarse cuando corresponda.
 
 ---
 
-# 5. Entidades existentes PEC a reutilizar
+# 5. Entidades PEC a reutilizar
 
 ## 5.1 Empresa
 
-Modelo existente:
+Modelo existente: `sspectenterprise`; PK lógica actual `sspecrpkent`.
 
-`sspectenterprise`
-
-PK actual:
-
-`sspecrpkent`
-
-Uso propuesto:
-
-- aislamiento de datos;
-- contexto empresarial;
-- catálogos;
-- registros Lost & Found.
-
-### Estado
-
-**CONFIRMADO** como entidad existente.
-
-### Pendiente
-
-Determinar si todas las entidades Lost & Found necesitan `enterprise_id` explícito o si algunas pueden derivarlo mediante establecimiento.
-
----
+**CONFIRMADO:** guardar `enterprise_id` en entidades raíz/transaccionales principales: `LostItemReport`, `FoundItem`, `RecoveryClaim`, `ItemMatch`, `ItemTransfer`, `ItemDelivery`, `ItemDisposal` y `LostFoundAudit`, con referencia a `sspectenterprise.sspecrpkent`. Debe concordar con el establecimiento relacionado. No duplicar `enterprise_id` en tablas hijas si se deriva de su padre.
 
 ## 5.2 Establecimiento
 
-Modelo existente:
+Modelo PEC: `sspectestablishment`; PK `sspecrpkest`.
 
-`sspectestablishment`
-
-PK actual:
-
-`sspecrpkest`
-
-Uso propuesto:
-
-- local donde se registra;
-- local que posee físicamente el artículo;
-- origen/destino de movimientos;
-- local de entrega.
-
-### Estado
-
-**CONFIRMADO** como entidad existente.
-
----
+**CONFIRMADO:** reutilizarlo para establecimiento de registro, custodio actual, origen/destino de transferencia y local de entrega/disposición. GCSS se representa como establecimiento PEC. La zona Lost & Found es interna al establecimiento y no corresponde al `id_zona` territorial PEC.
 
 ## 5.3 Usuario PEC
 
-Modelo existente:
+Modelo PEC: `sspectuser`; PK `sspecrpkuse`.
 
-`sspectuser`
+**CONFIRMADO:** responsables operativos y actores de auditoría referencian usuarios PEC. No crear entidad `Responsible`, no codificar nombres de personas ni usar responsables en texto libre. Los eventos conservan el usuario que realmente ejecutó la operación; usar referencias como createdBy, reviewedBy, contactedBy, transferredBy, receivedBy, deliveredBy y disposedBy según aplique.
 
-PK actual:
+## 5.4 Archivos
 
-`sspecrpkuse`
-
-Uso propuesto:
-
-- usuario que registra;
-- usuario que valida;
-- usuario que contacta;
-- responsable de custodia;
-- responsable de entrega;
-- responsable de destrucción;
-- actor de auditoría.
-
-### Estado
-
-**CONFIRMADO** como entidad existente.
+**CONFIRMADO:** PEC cuenta con StorageService y Google Cloud Storage. Lost & Found tendrá metadata conceptual propia `sspectlffile`, independiente de `sspectfile`, y asociaciones específicas del dominio: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcionalmente `OwnershipValidationFile`. No añadir FKs Lost & Found a `sspectfile`. Permisos por recurso, retención y acceso quedan para definición técnica posterior.
 
 ---
 
-## 5.4 Archivo
+# 6. Entidades del modelo lógico
 
-Modelo existente:
+Los nombres físicos siguientes son referencias candidatas al patrón PEC, no aprobación de tablas Prisma ni migraciones.
 
-`sspectfile`
+## 6.1 `LostItemReport` — `sspectlostitemreport` (candidato)
 
-Uso propuesto:
+Representa la declaración de pérdida, no el artículo físico. Tiene identificador funcional generado `idEncuentra` separado de la PK (`LF-L-AAAA-XXXXXX`, formato ajustable antes de implementar), empresa, establecimiento que registra/consulta cuando aplica, tema/subtema, descripción, lugar/fecha aproximados, canal, fecha/hora y usuario registrador. Conserva snapshot del reportante (identificación, nombres, apellidos y contacto) y puede asociar archivos propios, incluyendo audio si la declaración es por voz.
 
-- fotografías;
-- documentos;
-- evidencias;
-- actas;
-- evidencia de destrucción;
-- evidencia de desecho.
+Relaciones: empresa N:1; establecimiento de registro N:1 cuando aplique; `LostItemReport 1:N ItemMatch`; `LostItemReport 1:N LostItemReportFile`.
 
-### Estado
+## 6.2 `FoundItem` — `sspectfounditem` (candidato)
 
-**CONFIRMADO** como infraestructura existente.
+Representa el artículo físico encontrado. Incluye `itemCode` generado independientemente de PK física (`LF-F-AAAA-XXXXXX`, formato ajustable), `enterprise_id`, tema/subtema, descripción/categoría, lugar/fecha de hallazgo, zona interna, estado/custodia por dimensiones, usuario registrador, `currentEstablishmentId` como custodio físico actual, `expirationDate` y snapshot/version de CustodyPolicy aplicada.
 
-### Restricción
+Relaciones: empresa N:1; establecimiento custodio actual N:1; usuario creador N:1; zona interna N:1; `FoundItem 1:N ItemMatch`, `RecoveryClaim`, `CustodyMovement`, `ItemTransfer`, `FoundItemValidationReference` y archivos; `FoundItem 0..1 DocumentDetail`, `0..1 CardDetail` y `0..1 ItemDisposal`.
 
-No reutilizar asociaciones específicas de Quejas.
+**CONFIRMADO:** temas/subtemas usan la infraestructura de catálogos PEC con valores propios del módulo; `currentEstablishmentId` es custodio actual; Finder no es entidad inicial y sus datos históricos se guardan como snapshot; los estados se separan por dimensión.
 
-Lost & Found requiere asociaciones propias.
+## 6.3 `ItemMatch` — `sspectitemmatch` (candidato)
 
----
+Asociación persistente de posible coincidencia entre un `LostItemReport` y un `FoundItem`; soporta la relación N:M. Estados controlados `POSSIBLE`, `CONFIRMED`, `DISCARDED`; distingue generación manual/automática y conserva conceptualmente score, nivel y método. Un match confirmado no prueba propiedad ni entrega.
 
-# 6. Entidades nuevas propuestas
+Relaciones: N:1 `LostItemReport`, N:1 `FoundItem` y actor revisor PEC cuando corresponda. El algoritmo, pesos y umbrales exactos permanecen pendientes para la Spec de matching.
 
-## 6.1 `LostItemReport`
+## 6.4 `RecoveryClaim` (entidad principal; `sspectlfrecoveryclaim`, candidato)
 
-Tabla física candidata:
+Representa que una persona reclama un `FoundItem`. Puede originarse por `LostItemReport` + `ItemMatch` o directamente sobre `FoundItem` sin declaración previa. `FoundItem 1:N RecoveryClaim` permite reclamaciones de varias personas. Conserva snapshot del reclamante y referencia a la empresa, establecimiento y usuario responsables que apliquen.
 
-`sspectlostitemreport`
+Relaciones: N:1 `FoundItem`; asociación opcional al reporte/match de origen; `RecoveryClaim 1:N OwnershipValidation`; `RecoveryClaim 1:N ContactAttempt`; `RecoveryClaim 0..1 ItemDelivery` final válida.
 
-PK candidata:
+## 6.5 `OwnershipValidation` y sus entidades relacionadas
 
-`sspecrpklir`
+La validación pertenece a un reclamo: `RecoveryClaim 1:N OwnershipValidation`. No depende de `ItemMatch`.
 
-### Responsabilidad
+- `ValidationQuestion`: configuración administrable asociable a tema/subtema, con active, order, required y questionType cuando aplique.
+- `FoundItemValidationReference`: valores privados de referencia asociados al artículo y a una pregunta; no mostrarlos al reclamante antes de que responda.
+- `OwnershipValidation`: cada intento/resultados `HIGH_MATCH`, `MEDIUM_MATCH`, `LOW_MATCH`.
+- `OwnershipValidationAnswer`: respuesta del reclamante, FK lógica a pregunta y snapshot del texto exacto presentado.
 
-Representar una declaración de pérdida realizada por una persona.
+Cardinalidades de referencia y respuesta se detallan en §10. La lógica exacta de evaluación pertenece a la Spec de matching/validación posterior; no revelar `referenceValue` previamente.
 
-### Relaciones propuestas
+## 6.6 `ContactAttempt` — `sspectlfcontactattempt` (candidato)
 
-- N:1 `sspectenterprise`
-- N:1 `sspectestablishment` como local de registro/consulta, si aplica.
-- 1:N `ItemMatch`
-- 1:N archivos, si el reporte permite adjuntos.
+Registra una comunicación asociada a un `RecoveryClaim`, nunca directamente a `ItemMatch` o `LostItemReport`. Relación `RecoveryClaim 1:N ContactAttempt`. Cada intento indica modalidad `MANUAL` o `AUTOMATIC`, usuario cuando corresponda, canal controlado, fecha/hora y resultado: `CONTACTED`, `NO_ANSWER`, `WRONG_NUMBER` o `WILL_VISIT_STORE`.
 
-### Datos conceptuales esperados
+Regla aprobada: N intentos manuales y máximo 3 intentos automáticos. No se asigna valor a N en este modelo.
 
-- ID Encuentra;
-- descripción;
-- tema;
-- subtema;
-- lugar aproximado;
-- fecha aproximada;
-- local donde consulta;
-- tipo de identificación;
-- número de identificación;
-- nombres;
-- apellidos;
-- celular;
-- teléfono;
-- email;
-- canal;
-- fecha/hora;
-- usuario que registra.
+## 6.7 `CustodyMovement` — `sspectcustodymovement` (candidato)
 
-### Estado
+Historial estructurado de cambio físico de custodia: `FoundItem 1:N CustodyMovement`; registra establecimientos origen/destino y usuario responsable cuando aplique. `FoundItem.currentEstablishmentId` refleja custodio actual y se mantiene consistente/transaccionalmente con el movimiento. Solo el establecimiento que posee físicamente el artículo modifica custodia.
 
-**PROPUESTA / INFERIDO**
+## 6.8 `ItemTransfer` — `sspectlfitemtransfer` (candidato)
 
----
+Entidad de proceso propia y distinta de `CustodyMovement`; `FoundItem 1:N ItemTransfer`. Describe origen/destino, despacho, responsable, recepción, evidencias, fechas y estado. No se completa como recibida sin registrar la recepción. Al completarse, genera/refleja movimiento de custodia y actualiza el custodio actual según corresponda.
 
-## 6.2 `FoundItem`
+## 6.9 `ItemDelivery` — `sspectitemdelivery` (candidato)
 
-Tabla física candidata:
+Proceso de entrega asociado a reclamación: `RecoveryClaim 0..1 ItemDelivery` final válida. No mantiene `ItemMatch` como dependencia de dominio. Registra artículo, cliente/reclamante, establecimiento, usuario responsable, fecha/hora, firmas de cliente y colaborador, observaciones y archivo del acta firmada. Solo puede completarse cuando la reclamación supera la validación requerida y existe el acta firmada. El mecanismo técnico de firma queda pendiente para DELIVERY-001.
 
-`sspectfounditem`
+## 6.10 `ItemDisposal` — `sspectitemdisposal` (candidato)
 
-PK candidata:
+Cierre definitivo sin entrega; `FoundItem 0..1 ItemDisposal`. Tipos controlados `DESTROYED` / `DISCARDED`; relaciona artículo, establecimiento y usuario responsable, fecha, observaciones y evidencias. Es final y auditable, no elimina artículo/historial y no puede completarse si ya se entregó.
 
-`sspecrpkfit`
+## 6.11 `DocumentDetail` y `CardDetail`
 
-### Responsabilidad
+Detalles opcionales del artículo base: `FoundItem 0..1 DocumentDetail`; `FoundItem 0..1 CardDetail`.
 
-Representar el artículo físico encontrado y sujeto a custodia.
+`DocumentDetail` conserva tipo de documento físico, número y datos del titular cuando apliquen. `CardDetail` conserva banco, tipo, primeros seis y últimos cuatro dígitos; nunca se muestra el número completo. No confundir tipo de identificación personal `public."documentType"` (DNI, PASSPORT, RUC, CI, ANONIMO) con tipo de documento físico Lost & Found.
 
-### Relaciones propuestas
+## 6.12 Zonas internas
 
-- N:1 `sspectenterprise`
-- N:1 `sspectestablishment`
-- N:1 `sspectuser` como creador
-- 1:N `ItemMatch`
-- 1:N `CustodyMovement`
-- 1:N archivos
-- 0..1 / 1:N `ItemDelivery`
-- 0..1 / 1:N `ItemDisposal`
+`LostFoundZone` es catálogo lógico global de ubicaciones internas del establecimiento (Servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas, entrada principal, etc.). `LostFoundEstablishmentZone` habilita la relación entre establecimiento y zonas disponibles. Cada establecimiento utiliza solo zonas asociadas y `FoundItem` referencia la zona correspondiente. No derivar de Region/`id_zona`, no usar snapshot territorial ni modelar zona geográfica para esta función.
 
-### Campos conceptuales candidatos
+## 6.13 `CustodyPolicy`
 
-- id;
-- código de artículo;
-- nombre;
-- tema;
-- subtema;
-- lugar encontrado;
-- fecha encontrada;
-- finderType;
-- código de colaborador;
-- nombres de quien encontró;
-- apellidos;
-- cargo;
-- establecimiento actual;
-- zona;
-- usuario creador;
-- estado actual;
-- fecha de creación;
-- fecha de modificación.
+Configuración aprobada, no hardcodeada y versionada: categoría/tipo, días de custodia local/central, días de alerta, establecimiento destino, usuario responsable cuando aplique, acción final, requiere transferencia/evidencia, activo y versión. Al crear/aplicar una política, conservar en `FoundItem`/caso la versión aplicada y `expirationDate`. Cambios futuros de política no recalculan automáticamente registros históricos.
 
-### Estado inicial confirmado
+Valores: documentos 30 días en local, transferencia a GCSS, 90 días en GCSS y destrucción; artículos generales 90 días antes de correspondencia/transferencia configurada; alimentos hasta cierre del local y desecho con evidencia; alerta tres días antes. Solo detalles de cómputo y operación expresamente pendientes quedan abiertos en ARCH-001.
 
-`REGISTRADO`
+## 6.14 `LostFoundAudit` — `sspectlfaudit` (candidato)
 
-### Estado
-
-**PROPUESTA / INFERIDO**
-
----
-
-## 6.3 `ItemMatch`
-
-Tabla física candidata:
-
-`sspectitemmatch`
-
-PK candidata:
-
-`sspecrpkmat`
-
-### Responsabilidad
-
-Representar una posible coincidencia entre:
-
-`LostItemReport`
-
-y
-
-`FoundItem`
-
-### Relaciones
-
-- N:1 `LostItemReport`
-- N:1 `FoundItem`
-- N:1 usuario revisor, si aplica.
-
-### Cardinalidad conceptual
-
-`LostItemReport 1:N ItemMatch`
-
-`FoundItem 1:N ItemMatch`
-
-Esto permite conceptualmente una relación N:M entre reportes y artículos.
-
-### Datos candidatos
-
-- score / nivel de coincidencia;
-- origen del match;
-- estado;
-- creado por;
-- revisado por;
-- fecha creación;
-- fecha revisión;
-- observaciones.
-
-### Estado
-
-**PROPUESTA / INFERIDO**
-
----
-
-## 6.4 `OwnershipValidation`
-
-Tabla física candidata:
-
-`sspectownershipvalidation`
-
-PK candidata:
-
-`sspecrpkval`
-
-### Responsabilidad
-
-Registrar el proceso mediante el cual se intenta confirmar que una persona es propietaria de un artículo.
-
-### Relación propuesta
-
-Preferencia actual:
-
-N:1 `ItemMatch`
-
-### Pendiente
-
-Determinar si debe relacionarse:
-
-- con `ItemMatch`;
-- con `FoundItem`;
-- con una futura entidad `Claim`.
-
-### Restricción confirmada
-
-Las respuestas correctas no deben mostrarse previamente al cliente.
-
-### Estado
-
-**PROPUESTA / INFERIDO**
-
----
-
-## 6.5 `ContactAttempt`
-
-Tabla física candidata:
-
-`sspectlfcontactattempt`
-
-PK candidata:
-
-`sspecrpkcta`
-
-### Responsabilidad
-
-Registrar intentos y resultados de contacto con el propietario/reportante.
-
-### Relaciones candidatas
-
-- N:1 `ItemMatch`
-- N:1 `LostItemReport`
-- N:1 `sspectuser`
-
-### Pendiente
-
-Definir si el contacto pertenece:
-
-- a una coincidencia;
-- al reporte;
-- al artículo;
-- o a una futura entidad de reclamación.
-
-### Resultados funcionales confirmados
-
-- Contactado
-- No contesta
-- Número incorrecto
-- Se acercará al local
-
----
-
-## 6.6 `CustodyMovement`
-
-Tabla física candidata:
-
-`sspectcustodymovement`
-
-PK candidata:
-
-`sspecrpkcsm`
-
-### Responsabilidad
-
-Registrar cualquier cambio relevante en la custodia física del artículo.
-
-### Relaciones
-
-- N:1 `FoundItem`
-- N:1 establecimiento origen
-- N:1 establecimiento destino
-- N:1 usuario responsable
-
-### Tipos conceptuales candidatos
-
-- RECEIVED
-- TRANSFER_REQUESTED
-- TRANSFERRED
-- RECEIVED_AT_GCSS
-- DELIVERED
-- DISPOSED
-
-### Principio
-
-`CustodyMovement` representa el historial.
-
-`FoundItem.currentEstablishmentId` representa el custodio actual.
-
-### Estado
-
-**PROPUESTA / INFERIDO**
-
----
-
-## 6.7 `ItemDelivery`
-
-Tabla física candidata:
-
-`sspectitemdelivery`
-
-PK candidata:
-
-`sspecrpkdel`
-
-### Responsabilidad
-
-Registrar el proceso de entrega del artículo.
-
-### Relaciones propuestas
-
-- N:1 `FoundItem`
-- N:1 `ItemMatch`, cuando corresponda
-- N:1 establecimiento
-- N:1 usuario responsable
-- 1:N archivos/evidencias
-
-### Datos esperados
-
-- cliente;
-- responsable;
-- fecha;
-- hora;
-- observaciones;
-- firma cliente;
-- firma colaborador;
-- acta.
-
-### Restricción confirmada
-
-No puede cerrarse la entrega sin acta firmada.
-
----
-
-## 6.8 `ItemDisposal`
-
-Tabla física candidata:
-
-`sspectitemdisposal`
-
-PK candidata:
-
-`sspecrpkdsp`
-
-### Responsabilidad
-
-Registrar destrucción o desecho final del artículo.
-
-### Relaciones
-
-- N:1 `FoundItem`
-- N:1 establecimiento
-- N:1 usuario responsable
-- 1:N evidencias
-
-### Casos
-
-- destrucción de documentos;
-- desecho de alimentos;
-- otras disposiciones futuras.
-
-### Estado
-
-**PROPUESTA / INFERIDO**
-
----
-
-## 6.9 `LostFoundAudit`
-
-Tabla física candidata:
-
-`sspectlfaudit`
-
-PK candidata:
-
-`sspecrpkaud`
-
-### Responsabilidad
-
-Mantener auditoría funcional durable de eventos relevantes.
-
-### Debe registrar como mínimo
-
-- actor;
-- fecha/hora;
-- establecimiento;
-- acción;
-- entidad afectada;
-- valor anterior;
-- valor posterior.
-
-### Diseño pendiente
-
-Determinar si se utiliza:
-
-#### Opción A
-
-Tabla genérica:
-
-- entityType
-- entityId
-
-Ventaja:
-flexible.
-
-Riesgo:
-no existe FK fuerte hacia todas las entidades.
-
-#### Opción B
-
-Auditoría por dominio/eventos con FKs específicas.
-
-Ventaja:
-integridad relacional.
-
-Riesgo:
-más tablas/estructura.
-
-### Estado
-
-**PENDIENTE DE DEFINICIÓN**
+Auditoría genérica durable de negocio para Lost & Found. Registra como mínimo entityType/entityId/eventType, userId, username/contexto histórico cuando aplique, establishmentId, timestamp, previousValue/newValue y observations. Complementa, no sustituye, `CustodyMovement`, `ItemTransfer`, `ItemDelivery` e `ItemDisposal`. Los logs técnicos no son auditoría de negocio.
 
 ---
 
 # 7. Asociaciones con archivos
 
-No se recomienda agregar referencias Lost & Found dentro del campo actual de Quejas.
-
-Se plantean dos alternativas.
-
-## Alternativa A — tablas de asociación específicas
-
-Ejemplo:
-
-`sspectfounditemfile`
-
-`sspectdeliveryfile`
-
-`sspectdisposalfile`
-
-### Ventajas
-
-- integridad referencial;
-- semántica clara;
-- permisos específicos.
+**CONFIRMADO:** metadata independiente `sspectlffile`, almacenamiento compartido con PEC StorageService/Google Cloud Storage y asociaciones específicas Lost & Found: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcional `OwnershipValidationFile`. No agregar FKs de Lost & Found a `sspectfile` ni reutilizar asociaciones de Quejas. La política de retención/borrado físico de archivos se define separadamente.
 
 ---
 
-## Alternativa B — asociación genérica
+# 8. Catálogos y configuración
 
-Ejemplo conceptual:
+**CONFIRMADO:** reutilizar infraestructura de catálogo PEC para temas/subtemas, con valores semánticos propios de Lost & Found. No asumir valores de Quejas. Reutilizar `public."documentType"` solo para identificación de cliente/reportante. Mantener propios los tipos de documento físico y tarjeta, preguntas de validación, `LostFoundZone` y `CustodyPolicy`.
 
-`LostFoundFileLink`
-
-- fileId;
-- entityType;
-- entityId;
-- fileType.
-
-### Ventaja
-
-menos tablas.
-
-### Riesgo
-
-relación polimórfica sin FK fuerte.
-
-### Estado
-
-**PENDIENTE DE DEFINICIÓN**
-
----
-
-# 8. Catálogos candidatos
-
-PEC tiene infraestructura de catálogos.
-
-No está aprobado todavía reutilizar los valores actuales.
-
-Los siguientes catálogos son funcionalmente requeridos:
-
-- temas;
-- subtemas;
-- tipos de documento;
-- tipos de tarjeta;
-- canales;
-- preguntas de validación;
-- estados;
-- destinos;
-- responsables.
-
----
-
-## Opción A — reutilizar infraestructura existente
-
-Usar `sspectcatalog` o estructuras actuales.
-
-### Ventaja
-
-menos tablas nuevas.
-
-### Riesgo
-
-mezclar semánticas de distintos módulos.
-
----
-
-## Opción B — catálogos propios
-
-Tablas candidatas:
-
-`sspectlftheme`
-
-`sspectlfsubtheme`
-
-`sspectlfdocumenttype`
-
-`sspectlfcardtype`
-
-`sspectlfvalidationquestion`
-
-### Estado
-
-**PENDIENTE DE DEFINICIÓN**
+Canales controlados: Presencial, Teléfono, Chat, Correo electrónico, Redes sociales y App móvil. Estados son valores de dominio controlados y no se crean libremente. Destinos físicos usan `sspectestablishment`; destinos lógicos se expresan mediante reglas/proceso. Responsables se referencian por `sspectuser`; no texto libre ni entidad `Responsible`.
 
 ---
 
 # 9. Modelo lógico general
 
 ```text
-                            sspectenterprise
-                                   |
-                    +--------------+--------------+
-                    |                             |
-                    v                             v
-          sspectlostitemreport             sspectfounditem
-                    |                             |
-                    |                             |
-                    +----------+       +----------+
-                               v       v
-                           sspectitemmatch
-                                  |
-                    +-------------+-------------+
-                    |                           |
-                    v                           v
-      sspectownershipvalidation      sspectlfcontactattempt
+sspectenterprise
+  ├── LostItemReport ──1:N── ItemMatch ──N:1── FoundItem
+  └── FoundItem ──1:N── RecoveryClaim
+                         ├──1:N── OwnershipValidation ──1:N── OwnershipValidationAnswer
+                         ├──1:N── ContactAttempt
+                         └──0..1── ItemDelivery
 
+FoundItem ──1:N── CustodyMovement
+FoundItem ──1:N── ItemTransfer
+FoundItem ──0..1── ItemDisposal
+FoundItem ──0..1── DocumentDetail
+FoundItem ──0..1── CardDetail
+FoundItem ──1:N── FoundItemValidationReference
+ValidationQuestion ──1:N── FoundItemValidationReference
+ValidationQuestion ──1:N── OwnershipValidationAnswer
 
-sspectfounditem
-      |
-      +------ 1:N ------> sspectcustodymovement
-      |
-      +------ 1:N ------> archivos / evidencias
-      |
-      +------ 0..N -----> sspectitemdelivery
-      |
-      +------ 0..N -----> sspectitemdisposal
-
-
-sspectestablishment
-      |
-      +------ custodio actual
-      +------ origen/destino movimientos
-      +------ local de entrega
-      +------ local de disposición
-
-
-sspectuser
-      |
-      +------ creador
-      +------ revisor
-      +------ responsable contacto
-      +------ responsable custodia
-      +------ responsable entrega
-      +------ responsable disposición
-
+sspectestablishment ── custodio/destinos/locales de proceso
+sspectuser ── actores responsables de operaciones y auditoría
+LostFoundZone ── LostFoundEstablishmentZone ── sspectestablishment
+FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias ── sspectlffile
 ```
 
-# 10. Cardinalidades propuestas
+---
+
+# 10. Cardinalidades aprobadas
 
 | Origen | Relación | Destino |
 |---|---|---|
-| Enterprise | 1:N | LostItemReport |
-| Enterprise | 1:N | FoundItem |
 | LostItemReport | 1:N | ItemMatch |
 | FoundItem | 1:N | ItemMatch |
-| ItemMatch | 1:N | OwnershipValidation |
-| ItemMatch / Report | 1:N | ContactAttempt |
+| FoundItem | 1:N | RecoveryClaim |
+| RecoveryClaim | 1:N | OwnershipValidation |
+| RecoveryClaim | 1:N | ContactAttempt |
+| RecoveryClaim | 0..1 | ItemDelivery |
 | FoundItem | 1:N | CustodyMovement |
-| FoundItem | 0..N | ItemDelivery |
-| FoundItem | 0..N | ItemDisposal |
-| FoundItem | 1:N | FileLink |
-| Delivery | 1:N | FileLink |
-| Disposal | 1:N | FileLink |
-| Establishment | 1:N | FoundItem |
-| User | 1:N | Operaciones de dominio |
+| FoundItem | 1:N | ItemTransfer |
+| FoundItem | 0..1 | ItemDisposal |
+| FoundItem | 0..1 | DocumentDetail |
+| FoundItem | 0..1 | CardDetail |
+| FoundItem | 1:N | FoundItemValidationReference |
+| ValidationQuestion | 1:N | FoundItemValidationReference |
+| OwnershipValidation | 1:N | OwnershipValidationAnswer |
+| ValidationQuestion | 1:N | OwnershipValidationAnswer |
 
-> Todas las cardinalidades permanecen sujetas a revisión hasta aprobación de negocio y revisión técnica.
-
----
-
-# 11. Modelo actual del artículo encontrado
-
-Para Sprint 1, la entidad raíz esperada es:
-
-`FoundItem`
-
-## Campos candidatos
-
-| Campo | Obligatorio | Origen |
-|---|---:|---|
-| id | Sí | Sistema |
-| code | Sí | Sistema |
-| enterpriseId | Pendiente | Contexto |
-| currentEstablishmentId | Sí | Contexto / local |
-| name | Sí | Usuario |
-| topicId | Sí | Catálogo |
-| subtopicId | Sí | Catálogo |
-| foundPlace | Sí | Usuario |
-| foundDate | Sí | Usuario |
-| finderType | Sí | Usuario |
-| finderEmployeeCode | Condicional | Usuario |
-| finderName | Condicional | Sistema / usuario |
-| finderLastName | Condicional | Sistema / usuario |
-| finderPosition | Condicional | Sistema |
-| registeredByUserId | Sí | Sesión |
-| status | Sí | Sistema |
-| createdAt | Sí | Sistema |
-| updatedAt | Sí | Sistema |
-
-## Estado inicial
-
-**CONFIRMADO**
-
-`REGISTERED`
-
-## Decisiones pendientes
-
-- formato y generación de `code`;
-- si `enterpriseId` se persiste o se deriva;
-- si `currentEstablishmentId` representa custodio actual o local de registro;
-- si `topicId` y `subtopicId` reutilizan catálogos existentes;
-- si los datos del colaborador se almacenan como snapshot;
-- si `foundDate` incluye hora;
-- estrategia física de `status`.
+`ItemMatch` en ambos sentidos implementa la relación N:M entre LostItemReport y FoundItem. Las entidades raíz/transaccionales listadas en §5 guardan `enterprise_id`; hijos lo derivan cuando corresponda.
 
 ---
 
-# 12. Modelo de persona que encontró el artículo
+# 11. Datos conceptuales de FoundItem
 
-Se consideran dos alternativas.
-
-## Alternativa A — campos en `FoundItem`
-
-Campos candidatos:
-
-- `finderType`;
-- `finderEmployeeCode`;
-- `finderName`;
-- `finderLastName`;
-- `finderPosition`.
-
-### Ventajas
-
-- implementación más simple;
-- suficiente para el primer flujo;
-- evita crear una entidad sin necesidad confirmada.
-
-### Riesgos
-
-- duplicación si el concepto crece;
-- menor normalización;
-- dificultad futura si una misma persona se relaciona con múltiples registros.
+| Dato conceptual | Tratamiento aprobado |
+|---|---|
+| id / PK física | Interna; no es identificador visible funcional |
+| itemCode | Generado, separado de PK; formato inicial `LF-F-AAAA-XXXXXX`, independiente por empresa/año |
+| enterprise_id | FK lógica a empresa PEC; consistente con establecimiento |
+| currentEstablishmentId | Custodio físico actual, distinto de ubicación histórica |
+| tema/subtema | Catálogos PEC con valores propios Lost & Found |
+| zona | FK lógica a LostFoundZone habilitada para el establecimiento |
+| finderType | COLLABORATOR, CUSTOMER u OTHER |
+| finderEmployeeCode | Código colaborador cuando aplique |
+| finderName / finderLastName / finderPosition | Snapshot histórico de nombre, apellido y cargo |
+| registeredByUserId | Usuario PEC que registró |
+| estado | Dimensiones de dominio separadas y controladas |
+| expirationDate / policyVersion | Valor calculado y versión CustodyPolicy aplicada |
+| foundDate / createdAt / updatedAt | Fechas de negocio y sistema, según corresponda |
 
 ---
 
-## Alternativa B — entidad `Finder`
+# 12. Datos conceptuales del reportante y Finder
 
-Tabla nueva candidata:
+`LostItemReport` conserva snapshot del reportante: tipo/número de identificación, nombres, apellidos, celular/teléfono, email y demás datos registrados para el proceso. No se crea tabla genérica de snapshots.
 
-`sspectlffinder`
-
-### Posibles relaciones
-
-- 1:N con `FoundItem`;
-- posible vínculo con `sspectuser` cuando sea colaborador;
-- datos propios cuando sea cliente u otro.
-
-### Ventajas
-
-- mayor normalización;
-- facilita reutilización futura;
-- separación clara entre persona y artículo.
-
-### Riesgos
-
-- mayor complejidad;
-- posible sobrediseño si el concepto no necesita vida propia.
-
-## Propuesta actual
-
-**PROPUESTA / INFERIDO**
-
-Usar inicialmente campos dentro de `FoundItem`, salvo que la revisión con Walter y Roberto determine que `Finder` debe ser una entidad reutilizable.
+Finder permanece embebido conceptualmente en `FoundItem`, sin entidad Finder. Para colaborador se registra código, nombres, apellidos y cargo; nombre, apellido y cargo se conservan como snapshot del momento del hallazgo.
 
 ---
 
 # 13. Zonas
 
-En PEC se detectó `id_zona` como atributo, pero no un dominio completo `Zone`.
+`LostFoundZone` + `LostFoundEstablishmentZone` representan ubicaciones internas de cada local. Ejemplos: servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas y entrada principal. El establecimiento solo habilita/usa sus zonas vinculadas. `FoundItem` guarda referencia a la zona interna elegida.
 
-Se consideran las siguientes alternativas:
-
-## Opción A — derivar zona
-
-Derivar la zona desde:
-
-`Establishment → Region → id_zona`
-
-### Ventaja
-
-Evita duplicar información.
-
-### Riesgo
-
-Depende de que la relación existente sea confiable y suficiente para el módulo.
-
----
-
-## Opción B — almacenar `zoneId`
-
-Persistir una referencia explícita a zona si existe una fuente oficial.
-
-### Ventaja
-
-Consulta directa y trazabilidad.
-
-### Riesgo
-
-Duplicación o inconsistencia si el establecimiento cambia.
-
----
-
-## Opción C — guardar snapshot
-
-Guardar el código o descripción de zona al momento del registro.
-
-### Ventaja
-
-Conserva contexto histórico.
-
-### Riesgo
-
-Duplica datos y requiere reglas de actualización.
-
-## Estado
-
-**PENDIENTE DE DEFINICIÓN**
+No utilizar `Region → id_zona`, snapshots de zona territorial ni `id_zona` geográfico para este dominio.
 
 ---
 
 # 14. Estados
 
-No se recomienda reutilizar estados de Quejas.
+No reutilizar estados de Quejas ni modelar todos los procesos con un status único. Mantener dimensiones controladas por dominio: artículo/custodia, matching, RecoveryClaim, validación, contacto, entrega, transferencia y disposición. No permitir alta libre de estados.
 
-El modelo debe contemplar dimensiones distintas para:
-
-- artículo encontrado;
-- reporte perdido;
-- custodia;
-- matching;
-- validación;
-- contacto;
-- entrega;
-- vencimiento.
-
-## Estado inicial de artículo encontrado
-
-**CONFIRMADO**
-
-`REGISTERED`
-
-## Implementación física de estados
-
-**PENDIENTE DE DEFINICIÓN**
-
-Opciones:
-
-- enum Prisma;
-- catálogo;
-- tabla de estados;
-- combinación según dimensión.
-
-## Principio arquitectónico
-
-**PROPUESTA / INFERIDO**
-
-No utilizar un único campo de estado para representar simultáneamente:
-
-- custodia;
-- matching;
-- contacto;
-- validación;
-- entrega.
+Representar los estados funcionales requeridos: Registrado; En custodia del local; Gestión de contacto; Cliente contactado; Entregado al cliente; Pendiente de transferencia; Transferido al GCSS; En custodia GCSS; Pendiente de destrucción; Destruido; Posible coincidencia. Su asignación exacta a dimensión respeta los ciclos independientes y no crea un único enum.
 
 ---
 
 # 15. Auditoría y trazabilidad
 
-Las siguientes operaciones deben considerarse auditables:
+`LostFoundAudit` es la auditoría genérica durable de negocio. Registra quién ejecutó la acción, cuándo, desde qué local y qué cambió, además de entityType/entityId/eventType, contexto histórico, previousValue/newValue y observaciones cuando corresponda.
 
-- creación de reporte perdido;
-- registro de artículo encontrado;
-- edición;
-- creación de coincidencia;
-- confirmación o descarte de coincidencia;
-- validación de propiedad;
-- intento y resultado de contacto;
-- cambio de custodia;
-- transferencia;
-- recepción en GCSS;
-- entrega;
-- destrucción;
-- desecho;
-- cambios sensibles de datos.
-
-## Campos mínimos conceptuales
-
-- `userId`;
-- `establishmentId`;
-- `timestamp`;
-- `eventType`;
-- `entityType`;
-- `entityId`;
-- `previousValue`;
-- `newValue`;
-- `observations`;
-- `evidenceReference`, cuando aplique.
-
-## Regla confirmada
-
-La auditoría debe permitir conocer:
-
-- quién realizó la acción;
-- cuándo;
-- desde qué local;
-- qué cambió.
-
-## Estado
-
-**PENDIENTE DE DEFINICIÓN**
-
-Falta decidir el mecanismo físico definitivo de auditoría.
+Complementa las entidades de proceso `CustodyMovement`, `ItemTransfer`, `ItemDelivery` e `ItemDisposal`, que conservan su propia historia estructurada. Los logs técnicos y campos created/modified no sustituyen auditoría funcional.
 
 ---
 
-# 16. Reglas de integridad propuestas
+# 16. Reglas de integridad
 
-## RI-01
-
-Un `FoundItem` debe estar asociado a un establecimiento custodio actual mientras permanezca bajo custodia de PEC.
-
-## RI-02
-
-Un `CustodyMovement` no puede existir sin un `FoundItem`.
-
-## RI-03
-
-Las operaciones históricas de custodia, entrega, disposición y auditoría no deberían eliminarse físicamente sin una política explícita de retención.
-
-## RI-04
-
-Una entrega no puede cerrarse sin acta firmada.
-
-## RI-05
-
-No se debe mostrar el número completo de una tarjeta.
-
-Solo deben mostrarse:
-
-- primeros 6 dígitos;
-- últimos 4 dígitos.
-
-## RI-06
-
-Las respuestas correctas de validación de propiedad nunca deben mostrarse al cliente antes de que este responda.
-
-## RI-07
-
-Solo el local que posee físicamente el artículo puede modificar su custodia.
-
-## RI-08
-
-Una coincidencia no implica validación de propiedad.
-
-## RI-09
-
-Un `LostItemReport` puede existir sin que exista un `FoundItem` asociado.
-
-## RI-10
-
-Un `FoundItem` puede existir sin que exista un `LostItemReport` asociado.
+- `FoundItem.currentEstablishmentId` representa el custodio actual mientras el artículo esté bajo custodia PEC; todo cambio se coordina con `CustodyMovement`.
+- `CustodyMovement`, `ItemTransfer`, `RecoveryClaim`, detalles y procesos deben referir al padre de dominio correspondiente.
+- No completar `ItemDelivery` sin validación requerida y acta firmada.
+- No completar `ItemDisposal` después de entrega; entrega y disposición completadas son cierres finales excluyentes.
+- No completar `ItemTransfer` como recibida sin recepción registrada.
+- Solo el establecimiento custodio puede cambiar custodia.
+- `ItemMatch.CONFIRMED` no equivale a `OwnershipValidation` aprobada; validación aprobada habilita entrega, pero no la completa.
+- No exponer PAN completo ni referencias/respuestas de validación antes de que el reclamante responda.
+- Conservar historia transaccional; desactivar catálogos/configuración referenciados en vez de borrarlos físicamente. FK con RESTRICT por defecto; CASCADE solo en dependencias puramente técnicas sin pérdida de historia. Retención/borrado de archivos es política separada.
+- Snapshot dentro de su entidad/evento: reportante en LostItemReport, reclamante en RecoveryClaim, Finder en FoundItem, personas representadas en acta en ItemDelivery, texto de pregunta en OwnershipValidationAnswer y contexto de evento en LostFoundAudit. No crear tabla genérica de snapshots.
 
 ---
-
 # 17. Estrategia de implementación por Sprint
 
 El modelo lógico completo se define desde el inicio, pero las entidades se implementarán progresivamente.
@@ -1224,68 +477,47 @@ Entidades/capacidades candidatas:
 
 ---
 
-# 18. Decisiones pendientes para revisión Walter + Roberto
+# 18. Preguntas pendientes
 
-1. ¿Todas las entidades principales deben llevar `enterprise_id`?
-2. ¿`FoundItem` mantiene `currentEstablishmentId` además del historial `CustodyMovement`?
-3. ¿`ItemTransfer` será entidad propia o un tipo de `CustodyMovement`?
-4. ¿`ItemDelivery` admite múltiples intentos o registros por artículo?
-5. ¿`ItemDisposal` representa un único cierre final?
-6. ¿Cómo se representa GCSS dentro del modelo?
-7. ¿`Finder` se mantiene dentro de `FoundItem` o se convierte en entidad?
-8. ¿Cómo se relacionan archivos con las entidades Lost & Found?
-9. ¿Tema/subtema reutilizan `sspectcatalog` o se crean catálogos propios?
-10. ¿Estados serán enum, catálogo, tabla o combinación?
-11. ¿Zona se deriva o se persiste?
-12. ¿`LostFoundAudit` será genérica o específica por dominio?
-13. ¿El reportante puede vincularse opcionalmente a `sspectuser`?
-14. ¿`OwnershipValidation` pertenece a `ItemMatch` o a una futura entidad de reclamación?
-15. ¿`ContactAttempt` pertenece al reporte, al match o a una reclamación?
-16. ¿Documentos y tarjetas son subtipo de `FoundItem`, categoría o detalle especializado?
-17. ¿Qué estrategia de borrado aplica a cada FK?
-18. ¿Qué convención exacta de PK física debe seguir el módulo?
-19. ¿Cómo se genera el código del artículo encontrado?
-20. ¿Cómo se genera el `ID Encuentra`?
-21. ¿Qué campos requieren snapshot histórico aunque exista una FK?
-22. ¿El local donde se registra un reporte perdido es distinto del local donde se perdió el objeto?
-23. ¿El local actual del artículo debe conservarse también en `FoundItem` para consulta rápida?
-24. ¿Cómo se modelan destinos que no sean establecimientos PEC?
-25. ¿Qué entidades requieren control de versión/concurrencia?
+Los siguientes asuntos conservan su estado abierto y se detallan en las Specs funcionales o técnicas correspondientes.
 
----
+Pendientes reales únicamente:
 
+1. Mecanismo técnico exacto de firma del acta (DELIVERY-001).
+2. Algoritmo, pesos y umbrales exactos de matching.
+3. Proveedor y detalles técnicos de transcripción.
+4. Contrato técnico del servicio externo de datos/autocompletado del cliente.
+5. Detalles de decisión que correspondan a Specs funcionales posteriores.
 # 19. Criterios de aprobación
 
-`PEC-LF-DATA-001` podrá pasar a `v1.0 APPROVED` cuando:
+La aprobación `v1.0 APPROVED` de `PEC-LF-DATA-001` queda registrada con el cumplimiento de estos criterios:
 
-- [ ] `PEC-LF-ARCH-001` esté aprobado.
-- [ ] Las entidades principales estén acordadas.
-- [ ] Las relaciones principales estén acordadas.
-- [ ] Las cardinalidades críticas estén acordadas.
-- [ ] Las tablas PEC reutilizadas estén identificadas.
-- [ ] La estrategia de archivos esté acordada.
-- [ ] La estrategia de auditoría esté acordada.
-- [ ] La estrategia de custodia esté acordada.
-- [ ] La estrategia de catálogos esté acordada.
-- [ ] La estrategia de estados esté acordada.
-- [ ] La representación de GCSS esté acordada.
-- [ ] Las decisiones bloqueantes de Sprint 1 estén resueltas.
-- [ ] Walter y Roberto hayan revisado el modelo.
-- [ ] Las discrepancias con `PEC-LF-ARCH-001` estén resueltas.
+- [x] `PEC-LF-ARCH-001` esté aprobado.
+- [x] Las entidades principales estén acordadas.
+- [x] Las relaciones principales estén acordadas.
+- [x] Las cardinalidades críticas estén acordadas.
+- [x] Las referencias PEC reutilizadas estén identificadas.
+- [x] La estrategia de archivos esté acordada.
+- [x] La estrategia de auditoría esté acordada.
+- [x] La estrategia de custodia esté acordada.
+- [x] La estrategia de catálogos esté acordada.
+- [x] La estrategia de estados esté acordada.
+- [x] La representación de GCSS esté acordada.
+- [x] Las decisiones bloqueantes de Sprint 1 estén resueltas.
+- [x] Walter Molina haya revisado y aprobado el modelo.
+- [x] Las discrepancias con `PEC-LF-ARCH-001` estén resueltas.
 
 ---
 
 # 20. Estado de aprobación
 
-**Estado:** `BORRADOR`
+**Estado:** `APPROVED`
 
-**Versión:** `0.1.0`
+**Versión:** `1.0.0`
 
-**Aprobadores propuestos:**
+**Aprobador:**
 
 - Walter Molina
-- Roberto — revisión técnica
-- Responsable funcional / producto — si corresponde
 
 **Fecha:** `2026-09-30`
 
@@ -1302,3 +534,15 @@ La aprobación de este documento no implica crear todas las tablas inmediatament
 | Versión | Fecha | Autor | Cambios |
 |---|---|---|---|
 | 0.1.0 | 2026-09-30 | Mbrion / equipo PEC | Primer borrador del modelo lógico completo de Lost & Found. |
+| 0.2.0 | 2026-09-30 | Mbrion / equipo PEC | Consolidación de decisiones arquitectónicas y de modelo aprobadas durante revisión funcional/técnica. El resumen §22 remite a las decisiones documentadas en las secciones del modelo. |
+| 1.0.0 | 2026-09-30 | Walter Molina | Aprobación del modelo lógico Lost & Found por Walter Molina. |
+
+---
+
+# 22. Resumen de decisiones del modelo
+
+Este resumen orienta la consulta del modelo lógico desarrollado en §§5–16. `LostItemReport` y `FoundItem` son conceptos independientes; las relaciones, entidades y cardinalidades se describen en §§6 y 10. Las referencias y reutilización PEC, archivos, zonas, catálogo, roles y configuración se describen en §§5, 7–8 y 13. Estados, auditoría, integridad y snapshots se describen en §§14–16.
+
+Las políticas funcionales confirmadas de custodia y reportes se describen en §6.13 y §17. Los nombres físicos siguen siendo referencias conceptuales y no autorizan implementar tablas, Prisma ni migraciones. El documento está en estado **APPROVED**.
+
+Pendientes reales detallados en §18: mecanismo técnico de firma; algoritmo/pesos/umbrales de matching; proveedor/detalles de transcripción; contrato técnico del servicio externo de datos del cliente; y detalle implementable de Specs funcionales posteriores.
