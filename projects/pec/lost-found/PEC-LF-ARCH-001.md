@@ -10,7 +10,7 @@
 |---|---|
 | ID | `PEC-LF-ARCH-001` |
 | Título | Arquitectura y dominio de Artículos encontrados y declarados perdidos |
-| Versión | `0.3.0` |
+| Versión | `0.4.0` |
 | Autor | Mbrion / equipo PEC — por confirmar |
 | Fecha | `2026-09-30` |
 | Work item / backlog | Pendiente de referencia |
@@ -39,7 +39,7 @@ Disponer de un modelo de dominio y una arquitectura conceptual revisables que pe
 
 - Implementar código o modificar `pec-api` o `pec-ui`.
 - Crear modelos Prisma, migraciones, endpoints, componentes Angular o contratos implementables.
-- Aprobar un algoritmo de búsqueda/coincidencias, plazos de vencimiento, políticas de retención, estructura física de datos o permisos detallados.
+- Aprobar el algoritmo de búsqueda/coincidencias, políticas de retención, estructura física de datos o permisos detallados. Las duraciones funcionales confirmadas se mantienen como requisitos; los parámetros técnicos de cómputo siguen pendientes.
 - Definir integraciones como existentes o disponibles sin verificar sus capacidades y responsables.
 
 ### Supuestos
@@ -184,20 +184,21 @@ Los criterios de esta especificación verifican el resultado de arquitectura y d
 
 **CONFIRMADO:** el descubrimiento técnico no encontró una máquina de estados genérica reutilizable; los estados de quejas son propios de ese dominio y no se reutilizarán semánticamente para Lost & Found.
 
-**PROPUESTA / INFERIDO:** separar analíticamente reporte, matching, validación, contacto, custodia, entrega y vencimiento en dimensiones de estado distintas. El documento funcional presenta algunos estados en una misma lista de custodia; la separación conceptual aquí propuesta no aprueba todavía entidades ni máquinas de estados técnicas.
+**CONFIRMADO — estados funcionales requeridos:** Registrado; En custodia del local; Gestión de contacto; Cliente contactado; Entregado al cliente; Pendiente de transferencia; Transferido al GCSS; En custodia GCSS; Pendiente de destrucción; Destruido; Posible coincidencia.
 
-| Dimensión candidata | Ejemplos de estados/eventos para analizar (no aprobados) | Regla conocida | Decisión pendiente |
+**PROPUESTA / INFERIDO:** no representar todos estos conceptos en un único campo `status`. Separar analíticamente custodia, matching, validación, contacto, entrega y vencimiento. Esta separación no aprueba todavía modelos físicos ni máquinas de estados técnicas.
+
+| Dimensión | Estados/eventos funcionales y tratamiento | Regla conocida | Decisión pendiente |
 |---|---|---|---|
-| Reporte de pérdida | Registro con ID Encuentra automático; acciones Guardar, Buscar coincidencias y Cancelar | **CONFIRMADO:** registro inicial y datos funcionales descritos en el documento | Estados posteriores, edición/cancelación, duplicados y cardinalidad con hallazgos |
-| Artículo encontrado | Registrado | **CONFIRMADO:** estado inicial indicado | Transiciones posteriores y relación con reportes |
-| Custodia local/GCSS | En custodia del local; Pendiente de transferencia; Transferido al GCSS; En custodia GCSS; Pendiente de destrucción; Destruido; Entregado al cliente | **CONFIRMADO:** solo el local que posee físicamente el artículo modifica custodia. Documentos: 1 mes local y 3 meses GCSS antes de destrucción. | Secuencia exacta, recepción/acuse, responsable y excepciones; artículo general y alimentos siguen RB-07/RB-08 |
-| Matching | Posible coincidencia, pendiente de validación; revisar fotografías/características y confirmar o descartar | **CONFIRMADO:** existe el concepto funcional de posible coincidencia pendiente de validación | Algoritmo, umbrales, cardinalidad, prioridad y reversión |
-| Validación | Resultados: alta, media o baja coincidencia; validación correcta habilita continuar con entrega | **CONFIRMADO:** nunca mostrar previamente las respuestas registradas | Preguntas/configuración, número de intentos y resultado requerido para aprobación |
+| Registro de artículo | `Registrado` | **CONFIRMADO:** estado inicial del registro de artículo encontrado | Transiciones posteriores y su coordinación con custodia |
+| Custodia | En custodia del local; Pendiente de transferencia; Transferido al GCSS; En custodia GCSS; Pendiente de destrucción; Destruido | **CONFIRMADO:** solo el local con posesión física puede gestionar la custodia. Plazos según RB-06 a RB-08. | Secuencia exacta, recepción/acuse, responsable y excepciones |
+| Matching | Posible coincidencia; pendiente de validación; confirmar o descartar tras revisar características/fotografías | **CONFIRMADO:** existe el concepto funcional de posible coincidencia | Algoritmo, umbrales, cardinalidad, prioridad y reversión |
+| Validación | Resultado de coincidencia alta, media o baja; validación correcta permite continuar a entrega | **CONFIRMADO:** nunca mostrar previamente las respuestas registradas | Preguntas configurables, intentos y criterio de validación satisfactoria |
 | Contacto | Gestión de contacto; Cliente contactado. Resultados: Contactado, No contesta, Número incorrecto, Se acercará al local | **CONFIRMADO:** activar correo y/o llamada cuando existan datos del propietario | Frecuencia, tiempos, consentimiento, errores y cierre de seguimiento |
-| Entrega | Generar acta automáticamente; cargar acta firmada | **CONFIRMADO:** no cerrar caso sin el archivo del acta firmada | Firmantes admitidos, validez de firma, cancelación, archivo y trazabilidad física |
-| Vencimiento / disposición | Documentos: 1 mes local → transferencia pendiente → GCSS 3 meses → destrucción; artículos generales: 3 meses → correspondencia interna; alimentos: hasta cierre del local → desecho con evidencia | **CONFIRMADO:** alerta 3 días antes por sistema/correo/reporte Excel/notificación | Evento técnico de inicio, zona horaria/calendario, excepciones, responsables, parámetros y fallos |
+| Entrega | Entregado al cliente, después de completar la evidencia exigida | **CONFIRMADO:** generar acta y cargar el acta firmada; no cerrar sin ella | Firmantes admitidos, validez de firma, cancelación, archivo y trazabilidad física |
+| Vencimiento / disposición | Documentos: 1 mes local → transferencia → GCSS → 3 meses → destrucción; artículos generales: 3 meses → correspondencia interna; alimentos: hasta cierre del local → desecho con evidencia | **CONFIRMADO:** alertas 3 días antes por sistema, correo y reporte Excel/notificación | Evento técnico de inicio, zona horaria/calendario, excepciones, responsables, parámetros y fallos |
 
-**CONFIRMADO — requisito funcional de auditoría:** registrar quién realizó la acción, cuándo, desde qué local y qué cambió. **PROPUESTA / INFERIDO:** registrar también origen/destino, motivo y referencia a evidencia cuando aplique. Fuente PEC, formato, integridad, acceso y retención quedan pendientes.
+**CONFIRMADO — requisito funcional de auditoría:** registrar quién realizó la acción, cuándo, desde qué local y qué cambió. **PROPUESTA / INFERIDO:** registrar también origen/destino, motivo y referencia a evidencia cuando aplique. Logging técnico existe en PEC, pero no reemplaza la auditoría de negocio durable. Fuente, formato, integridad, acceso y retención quedan pendientes.
 
 ## 13. Roles y permisos (cuando aplique)
 
@@ -271,13 +272,180 @@ No se definen rutas, endpoints, eventos ni esquemas de API en esta especificaci�
 
 Los flujos, vistas finales y perfiles de pantalla se documentarán en especificaciones funcionales posteriores.
 
+## Cobertura funcional completa del requerimiento
+
+Esta sección refleja los trece módulos del documento funcional y su tratamiento de arquitectura. `ARCH-001` describe capacidades, datos de negocio a nivel conceptual, reglas y dependencias; no define columnas físicas, claves foráneas, modelos Prisma ni tablas. El diseño lógico de entidades y relaciones corresponde a `PEC-LF-DATA-001`; el detalle de comportamiento implementable corresponderá a especificaciones funcionales posteriores.
+
+En las siguientes subsecciones, **REUTILIZAR PEC**, **ADAPTAR / EXTENDER PEC**, **NUEVO** y **PENDIENTE DE DEFINICIÓN** califican el tratamiento arquitectónico. Reutilizar una infraestructura no significa reutilizar la lógica de negocio de Quejas.
+
+### 1. Registro inicial
+
+- **Objetivo funcional:** iniciar un registro de pérdida o hallazgo y proporcionar un identificador de seguimiento del módulo.
+- **Datos principales:** ID Encuentra generado por el sistema; tipo de registro; fecha; canal; actor que registra; datos básicos de la persona; descripción y clasificación del artículo; local y ubicación/fecha relacionadas; archivos o fotografías cuando apliquen.
+- **Reglas relevantes:** conservar la distinción entre declaración de pérdida y objeto físico encontrado; aplicar permisos del rol; proteger datos personales y números de tarjeta.
+- **Dependencias:** registros de pérdida/encontrado, usuarios y locales, catálogos funcionales, archivos y auditoría.
+- **Tratamiento arquitectónico:** **ADAPTAR / EXTENDER PEC** para autenticación, contexto de usuario/local y carga de archivos; **NUEVO** para flujo, identificador ID Encuentra y reglas de registro; **PENDIENTE DE DEFINICIÓN** para formato del identificador y datos obligatorios por tipo.
+- **Capacidades PEC candidatas:** Keycloak, CASL/PoliciesGuard, `sspectuser`, `sspectenterprise`, `sspectestablishment`, `UserEstablishment`, catálogos, GCS/`sspectfile`.
+
+### 2. Registro de artículo perdido
+
+- **Objetivo funcional:** registrar la declaración de una persona que informa que perdió u olvidó un artículo, aunque todavía no haya un objeto encontrado.
+- **Datos principales:** ID Encuentra; tipo/número de identificación; nombres; medios de contacto; tipo y descripción del artículo; tema/subtema; lugar y fecha aproximados; local/canal de registro; fotografías o archivos cuando correspondan.
+- **Reglas relevantes:** no crear por implicación un artículo físico en custodia; preservar la declaración aunque no haya coincidencia; una coincidencia requiere validación antes de habilitar la entrega.
+- **Dependencias:** registro inicial, catálogos, búsqueda nacional, coincidencias, validación, contacto y privacidad.
+- **Tratamiento arquitectónico:** **NUEVO** para la capacidad de declaración y su ciclo funcional; **REUTILIZAR PEC** para identidad/locales y mecanismos genéricos; **ADAPTAR / EXTENDER PEC** para asociación de archivos; **PENDIENTE DE DEFINICIÓN** para campos obligatorios, edición/cierre y tipo de reportante externo.
+- **Capacidades PEC candidatas:** `sspectuser`, `sspectenterprise`, `sspectestablishment`, `UserEstablishment`, catálogos, GCS/`sspectfile`, logging técnico como complemento y no como historial de dominio.
+
+### 3. Registro de artículo encontrado
+
+- **Objetivo funcional:** registrar un objeto físico localizado y bajo responsabilidad de un local.
+- **Datos principales:** ID Encuentra; descripción, tema/subtema, fecha y lugar del hallazgo; categoría; local que lo posee; cantidad y responsable cuando aplique; fotografías/archivos; estado inicial `Registrado`.
+- **Reglas relevantes:** el hallazgo es independiente de cualquier reporte de pérdida; solo el local que tiene posesión física puede modificar la custodia; registrar las transiciones relevantes.
+- **Dependencias:** registro inicial, local, catálogos, custodia, búsqueda nacional, vencimientos, contacto, entrega y auditoría.
+- **Tratamiento arquitectónico:** **NUEVO** para el registro físico y su ciclo; **REUTILIZAR PEC** para referencias de usuario/empresa/establecimiento; **ADAPTAR / EXTENDER PEC** para archivos, notificaciones y scheduler; **PENDIENTE DE DEFINICIÓN** para clasificación y ubicación detallada.
+- **Capacidades PEC candidatas:** `sspectenterprise`, `sspectestablishment`, `sspectuser`, `UserEstablishment`, catálogos, GCS/`sspectfile`, notificaciones y scheduler NestJS.
+
+### 4. Registro especial de documentos y tarjetas
+
+- **Objetivo funcional:** capturar los datos diferenciados requeridos para documentos y tarjetas encontrados.
+- **Datos principales:** documentos: cédula, licencia, pasaporte y carné; tarjetas: bancaria, afiliación y regalo; tipo, datos identificativos disponibles, titular, datos adicionales y archivos/fotografías cuando apliquen.
+- **Reglas relevantes:** mostrar únicamente primeros 6 y últimos 4 dígitos de tarjetas; nunca mostrar la numeración completa; cuando existan datos de la persona propietaria, activar la gestión de contacto; el autocompletado depende de una integración disponible.
+- **Dependencias:** artículo encontrado, tipos administrables, protección de datos, archivos, contacto y posibles fuentes externas de consulta.
+- **Tratamiento arquitectónico:** **NUEVO** para captura y reglas específicas del módulo; **ADAPTAR / EXTENDER PEC** para archivos y contacto; **PENDIENTE DE DEFINICIÓN** para autocompletado, fuente/contrato, tratamiento de números cortos, persistencia de valores completos y clasificación conceptual como categoría/detalle.
+- **Capacidades PEC candidatas:** GCS/`sspectfile`, correo/notificaciones; no se confirma un catálogo PEC equivalente de tipos de documento/tarjeta ni una integración de autocompletado.
+
+### 5. Búsqueda nacional
+
+- **Objetivo funcional:** localizar candidatos de artículos registrados en cualquier local PEC.
+- **Datos principales:** filtros por texto libre, tema, subtema, fecha, local, estado e identificación; resultados con nombre/datos no sensibles, tema/subtema, fecha, local de custodia y nivel de coincidencia.
+- **Reglas relevantes:** alcance nacional; Redes Sociales no tiene permiso de búsqueda; no exponer en resultados datos sensibles ni tratar una coincidencia como prueba de propiedad.
+- **Dependencias:** registros perdidos/encontrados, catálogos, establecimientos, matching, permisos y seguridad de datos.
+- **Tratamiento arquitectónico:** **NUEVO** para consulta, criterios y algoritmo de búsqueda Lost & Found; **REUTILIZAR PEC** para autorización/contexto y patrones genéricos de consulta/listado si aplican; **PENDIENTE DE DEFINICIÓN** para algoritmo, prioridad, revisión humana y límites de visibilidad.
+- **Capacidades PEC candidatas:** CASL/PoliciesGuard, datos de establecimientos y catálogos; reportes PEC no sustituyen la lógica de búsqueda del módulo.
+
+### 6. Validación de propiedad
+
+- **Objetivo funcional:** comprobar que quien reclama un artículo puede acreditar que le pertenece.
+- **Datos principales:** preguntas y respuestas sobre color, marca, contenido, características y detalles particulares; evidencias; resultado de coincidencia alta, media o baja.
+- **Reglas relevantes:** nunca mostrar previamente al cliente las respuestas registradas; una validación correcta habilita continuar con la entrega; la validación y el matching son dimensiones distintas.
+- **Dependencias:** artículo/candidato, preguntas administradas, permisos, protección de respuestas, contacto y entrega.
+- **Tratamiento arquitectónico:** **NUEVO** para flujo, criterios y protección específica; **ADAPTAR / EXTENDER PEC** para autorización y almacenamiento protegido de evidencias; **PENDIENTE DE DEFINICIÓN** para intentos, configuración de preguntas, umbral satisfactorio y manejo de resultado inconcluso.
+- **Capacidades PEC candidatas:** CASL/PoliciesGuard, catálogos/configuración solo si se confirma su adecuación, GCS/`sspectfile` para evidencias. No se encontró lógica equivalente reutilizable en Quejas.
+
+### 7. Entrega del artículo
+
+- **Objetivo funcional:** registrar la entrega del artículo al cliente que superó la validación.
+- **Datos principales:** cliente, artículo, local, responsable, fecha y hora, firma del cliente, firma del colaborador, observaciones y acta.
+- **Reglas relevantes:** generar el acta; cargar obligatoriamente el acta firmada; no cerrar la entrega sin ella; conservar trazabilidad de entrega y cambio de custodia.
+- **Dependencias:** matching, validación satisfactoria, artículo/local, usuario responsable, firma/acta, archivos y auditoría.
+- **Tratamiento arquitectónico:** **NUEVO** para proceso y reglas de entrega; **ADAPTAR / EXTENDER PEC** para almacenar/servir el acta y autorización; **PENDIENTE DE DEFINICIÓN** para firma válida, representación, cancelación y envío físico del acta a Experiencia del Cliente (el destinatario aparece como “xxx”).
+- **Capacidades PEC candidatas:** GCS/`sspectfile`, CASL/PoliciesGuard, `sspectuser`, `sspectestablishment`; no se encontró un flujo de entrega Lost & Found existente.
+
+### 8. Gestión de custodia
+
+- **Objetivo funcional:** seguir quién tiene el artículo, dónde permanece y cuándo se transfiere o dispone.
+- **Datos principales:** local poseedor, estado funcional, responsable, eventos de custodia, destino de transferencia y evidencia asociada.
+- **Reglas relevantes:** solo el local con posesión física puede gestionar custodia; conservar auditoría; la transferencia a GCSS y correspondencia forma parte del proceso funcional.
+- **Dependencias:** artículo encontrado, establecimientos, vencimientos, transferencias, disposición, permisos y auditoría.
+- **Tratamiento arquitectónico:** **NUEVO** para reglas y ciclo de custodia; **REUTILIZAR PEC** para referencias de locales/usuarios y scheduler; **ADAPTAR / EXTENDER PEC** para archivos/notificaciones; **PENDIENTE DE DEFINICIÓN** para acuses, recepción GCSS y acreditación operativa de posesión.
+- **Capacidades PEC candidatas:** `sspectestablishment`, `UserEstablishment`, CASL/PoliciesGuard, GCS/`sspectfile`, notificaciones y scheduler. Los estados de Quejas no se reutilizan.
+
+### 9. Gestión automática de contacto
+
+- **Objetivo funcional:** activar seguimiento del propietario y registrar el resultado de cada contacto.
+- **Datos principales:** canal correo o gestión telefónica; destinatario; fecha/intento; responsable; resultado: Contactado, No contesta, Número incorrecto o Se acercará al local.
+- **Reglas relevantes:** activar correo y/o llamada cuando existan datos del propietario; limitar la información personal expuesta; guardar el resultado para el seguimiento operativo.
+- **Dependencias:** datos de identificación/contacto, coincidencia, validación, artículo/local, eventos y plantillas.
+- **Tratamiento arquitectónico:** **ADAPTAR / EXTENDER PEC** para canal in-app/email y procesadores por evento; **NUEVO** para eventos, reglas, registro de intentos y resultados Lost & Found; **PENDIENTE DE DEFINICIÓN** para consentimiento, destinatarios, plantillas, frecuencia, reintentos y manejo de fallos.
+- **Capacidades PEC candidatas:** notificaciones in-app, email y procesadores por evento; no se reutiliza la lógica de notificación de Quejas como comportamiento funcional.
+
+### 10. Gestión de vencimientos
+
+- **Objetivo funcional:** ejecutar los plazos, alertas, transferencias y disposiciones diferenciados por tipo de artículo.
+- **Datos principales:** clase de artículo/documento, fecha de referencia, vencimiento, local/destino, responsable, alerta y evidencia de transferencia o disposición.
+- **Reglas relevantes — CONFIRMADAS:** documentos: 1 mes en el local → pendiente de transferencia → GCSS → permanencia de 3 meses → destrucción; artículos generales: 3 meses → transferencia/correspondencia interna; alimentos/comida rápida: hasta cierre del local → desecho con evidencia; emitir alertas 3 días antes del vencimiento.
+- **Dependencias:** artículo, local, parámetros, responsables, notificaciones, Excel/reportes, scheduler, transferencia y auditoría.
+- **Tratamiento arquitectónico:** **ADAPTAR / REUTILIZAR PEC** para infraestructura NestJS Schedule y canales; **NUEVO** para jobs, reglas y acciones Lost & Found; **PENDIENTE DE DEFINICIÓN** solo para evento técnico de inicio, zona horaria/calendario, excepciones, responsables, parametrización y manejo de fallos (incluida idempotencia y concurrencia).
+- **Capacidades PEC candidatas:** scheduler NestJS, notificaciones/email, reportes/Excel y logging técnico como diagnóstico complementario; los jobs de vencimiento del módulo aún no existen.
+
+### 11. Reportes
+
+- **Objetivo funcional:** consultar seguimiento e indicadores operativos de los artículos y procesos.
+- **Datos principales / reportes requeridos:** artículos encontrados; artículos perdidos; pendientes de entrega; próximos a vencer; transferidos; destruidos; documentos; tarjetas. Filtros/agrupación por local, zona, fechas, tema y estado; datos generales incluyen ID Encuentra, fecha de registro, comentario, tema/subtema, local, zona, cantidad, estado, responsable y vencimiento.
+- **Reglas relevantes:** respetar permisos y ocultar datos sensibles; exportar a Excel; la lógica/definición de estos reportes es propia de Lost & Found.
+- **Dependencias:** registros, estados, catálogo y zona, vencimientos, permisos, privacidad y exportación.
+- **Tratamiento arquitectónico:** **REUTILIZAR PEC / ADAPTAR / EXTENDER PEC** para infraestructura genérica de reportes/exportación (`ReportsService`, `ExcelExportService`/ExcelJS y exportación frontend `xlsx`); **NUEVO** para consultas, métricas y reglas funcionales Lost & Found; **PENDIENTE DE DEFINICIÓN** para backend vs. frontend, permisos, volumen y campos exportables.
+- **Capacidades PEC candidatas:** `ReportsService`, ExcelJS, `xlsx`, catálogos y locales. **NO REUTILIZAR** lógica de reportes de Quejas.
+
+### 12. Administración
+
+- **Objetivo funcional:** administrar valores y parámetros operativos que controlan la captura, clasificación, contacto, validación y vencimientos.
+- **Datos principales:** elementos de configuración indicados en la tabla de administración que sigue.
+- **Reglas relevantes:** cada catálogo debe corresponder a la semántica Lost & Found; su existencia en PEC no confirma que sea compartible; restringir cambios de configuración por permisos.
+- **Dependencias:** empresa/local/zona, roles, notificaciones, validación, vencimientos y reportes.
+- **Tratamiento arquitectónico:** **ADAPTAR / EXTENDER PEC** donde el mecanismo genérico de catálogos/configuración sea adecuado; **NUEVO** para valores y reglas propios; **PENDIENTE DE DEFINICIÓN** para autorización administrativa, propiedad de catálogo y alcance por empresa/local.
+- **Capacidades PEC candidatas:** infraestructura de catálogos, usuarios/empresas/locales, notificaciones/email y configuración. No reutilizar catálogos de Quejas por equivalencia nominal solamente.
+
+| Elemento administrable | Situación PEC confirmada | Tratamiento para Lost & Found |
+|---|---|---|
+| Temas | Existe infraestructura genérica de catálogos; equivalencia funcional no confirmada | **ADAPTAR / EXTENDER PEC** si los conceptos coinciden; de lo contrario **NUEVO**. Reutilización pendiente de confirmar. |
+| Subtemas | Igual que temas; no se confirma jerarquía adecuada para el módulo | **ADAPTAR / EXTENDER PEC** o **NUEVO**; relación con tema pendiente. |
+| Locales | Existen `sspectestablishment` y relaciones con usuarios/empresa | **REUTILIZAR PEC / ADAPTAR** al alcance del módulo. |
+| Zonas | Existe atributo `id_zona`; no se encontró dominio `Zone` completo | **PENDIENTE DE DEFINICIÓN** de autoridad y catálogo; después decidir **ADAPTAR / EXTENDER PEC** o **NUEVO**. |
+| Tipos de identificación | No se confirma catálogo funcional adecuado para este módulo | **PENDIENTE DE DEFINICIÓN**; usar infraestructura de catálogos solo tras validar contenido y dueño. |
+| Canales | Existen canales técnicos in-app/email; catálogo funcional no confirmado | **ADAPTAR / EXTENDER PEC** para mecanismos; valores configurables del módulo **NUEVOS** o pendientes. |
+| Estados | Existen estados específicos de Quejas; no máquina genérica reutilizable | **NUEVO** para semántica Lost & Found; no reutilizar estados de Quejas. |
+| Roles | Existe Keycloak y CASL/PoliciesGuard | **ADAPTAR / EXTENDER PEC** para autorización; mapeo de roles del módulo **PENDIENTE DE DEFINICIÓN**. |
+| Plantillas de correo | Existen email y procesadores por evento; administración de plantillas reusable no confirmada | **ADAPTAR / EXTENDER PEC** para canal/procesador; gestión de plantillas **PENDIENTE DE DEFINICIÓN** o **NUEVA**. |
+| Preguntas de validación | No se confirma capacidad equivalente de dominio | **NUEVO**; permisos y protección de respuestas pendientes de diseño. |
+| Tiempo de custodia | Scheduler disponible; parámetro de Lost & Found no confirmado | **NUEVO** como parámetro funcional; ejecución **ADAPTAR / EXTENDER PEC**. |
+| Tiempo de alertas | Notificaciones y scheduler disponibles; parámetro específico no confirmado | **NUEVO** como parámetro funcional; canales **ADAPTAR / EXTENDER PEC**. |
+| Destinos | No se confirma catálogo PEC para GCSS/correspondencia | **NUEVO** o **PENDIENTE DE DEFINICIÓN** según validación de destinos y contratos. |
+| Responsables | Existen usuarios, empresas y establecimientos; asignación funcional no confirmada | **REUTILIZAR PEC / ADAPTAR** para referenciar usuarios/locales; reglas de asignación pendientes. |
+| Tipos de documentos | No se confirma catálogo compatible con el módulo | **NUEVO** o **ADAPTAR / EXTENDER PEC** tras revisar catálogo existente. |
+| Tipos de tarjetas | No se confirma catálogo compatible con el módulo | **NUEVO** o **ADAPTAR / EXTENDER PEC** tras revisar catálogo existente. |
+
+### 13. Roles y permisos
+
+- **Objetivo funcional:** permitir las acciones definidas por la matriz funcional y aplicar el límite de custodia por posesión física.
+- **Datos principales:** roles Admin Local, Redes Sociales, Gestor Local y Gestión de Quejas; permisos de consulta, registro, búsqueda, validación, contacto, entrega, actas, custodia, vencimientos y correspondencia.
+- **Reglas relevantes:** la matriz de permisos de la sección 13 está confirmada; Redes Sociales solo puede registrar artículos perdidos/encontrados entre las funciones enumeradas; el local poseedor es el único que modifica custodia.
+- **Dependencias:** identidad Keycloak, contexto de usuario/empresa/local, `UserEnterpriseRole`, `UserEstablishment`, CASL/PoliciesGuard y contexto de posesión.
+- **Tratamiento arquitectónico:** **REUTILIZAR PEC / ADAPTAR / EXTENDER PEC** para identidad y mecanismo de políticas; permisos del módulo son configuración/reglas **NUEVAS**; mapeo de Gestor Local, ámbito territorial y autorización contextual permanecen **PENDIENTES DE DEFINICIÓN**.
+- **Capacidades PEC candidatas:** Keycloak, `AuthGuard`, CASL/PoliciesGuard, `sspectuser`, `sspectenterprise`, `sspectestablishment`, `UserEnterpriseRole` y `UserEstablishment`. No reutilizar reglas de Quejas como permisos del nuevo módulo.
+
+### Componentes transversales recomendados
+
+El documento funcional recomienda responsabilidades arquitectónicas para:
+
+- **Reglas de negocio:** evaluar condiciones funcionales, permisos, plazos y restricciones antes de aceptar transiciones.
+- **Automatizaciones:** ejecutar alertas, contacto y acciones programadas de vencimiento con reintentos, control de concurrencia e idempotencia por definir.
+- **Búsqueda / identificación:** encontrar candidatos en ámbito nacional y soportar revisión/validación sin revelar datos restringidos.
+- **Auditoría / trazabilidad:** conservar quién actuó, cuándo, desde qué local y qué cambió, especialmente en custodia, entrega, transferencia y destrucción.
+
+**PROPUESTA / INFERIDO:** son responsabilidades lógicas, no una decisión de cuatro servicios físicos separados. Podrían distribuirse entre módulos o componentes según límites y contratos que se definan posteriormente.
+
+### Datos personales y seguridad
+
+El proceso contempla como **CONFIRMADOS** tipo/número de identificación, nombres y apellidos, celular/teléfono, email, fotografías, archivos/documentos, datos de tarjetas, firmas y respuestas de validación. Deben mantenerse estas condiciones arquitectónicas:
+
+- **CONFIRMADO:** no mostrar la numeración completa de tarjetas; mostrar únicamente primeros 6 y últimos 4 dígitos.
+- **CONFIRMADO:** no mostrar al cliente respuestas de validación previamente registradas.
+- **CONFIRMADO:** aplicar la matriz por rol y limitar cambios de custodia al local poseedor.
+- **PROPUESTA / INFERIDO:** restringir datos sensibles en logs técnicos y usar datos sintéticos/anonimizados en QA.
+- **PENDIENTE DE DEFINICIÓN:** visibilidad por campo/canal, base legal, retención, manejo de datos completos, controles específicos de QA y gestión de incidentes.
+
+### Cobertura visual
+
+**CONFIRMADO:** existe un prototipo de Figma como referencia de UX/UI. La navegación/pantalla de **Búsqueda Nacional** está incompleta en ese prototipo; se registra solo como observación, no como requerimiento ni comportamiento esperado. Los filtros, resultados y permisos funcionales provienen del documento funcional.
+
 ## 17. Decisiones técnicas (cuando aplique)
 
 | Decisión / principio | Motivo | Estado / consecuencia |
 |---|---|---|
 | Separar conceptualmente reporte de pérdida y artículo encontrado | **CONFIRMADO:** un reporte no implica necesariamente un objeto encontrado bajo custodia | Principio arquitectónico confirmado; estructura física y cardinalidades pendientes |
 | Analizar dimensiones independientes para matching, validación, contacto y custodia | Son procesos distintos con reglas y responsables potencialmente distintos | **PROPUESTA / INFERIDO:** validar coordinación y estados antes de diseño técnico |
-| No definir todavía entidades, tablas, endpoints ni modelos de implementación | Esta especificación es de arquitectura/dominio y varias decisiones base siguen abiertas | Restricción de alcance de esta especificación |
+| Mantener ARCH-001 en el nivel de arquitectura y dominio | Entidades/tablas físicas, columnas, claves foráneas y modelos Prisma pertenecen a DATA-001; contratos y comportamiento detallado pertenecen a sus especificaciones | No incluir aquí esquema físico ni contratos implementables; mantener conceptos y responsabilidades funcionales |
 | Mantener protección transversal de tarjeta, respuestas de validación, acta y auditoría | Reglas funcionales confirmadas | Definir controles y contratos después de investigar capacidades PEC |
 | No asumir reutilización de servicios PEC por nombre | La capacidad, contrato y dueño deben verificarse | **PENDIENTE DE DEFINICIÓN:** investigación de integraciones |
 | Evaluar motores transversales de reglas, automatizaciones, búsqueda/identificación y auditoría/trazabilidad | El documento funcional los recomienda para implementar tiempos, transiciones, transferencias, alertas, coincidencias e historial | **PROPUESTA / INFERIDO:** son recomendaciones de arquitectura, no componentes existentes ni decisiones técnicas aprobadas |
@@ -308,12 +476,12 @@ Los flujos, vistas finales y perfiles de pantalla se documentarán en especifica
 17. **Auditoría:** PEC no tiene un historial genérico de auditoría de dominio encontrado. ¿Qué mecanismo durable se diseñará para guardar quién, cuándo, desde qué local y qué cambió? ¿Qué acceso, integridad y retención requiere?
 18. **Integraciones PEC:** ¿Quiénes son propietarios y cuáles son los contratos/garantías de Keycloak, CASL/PoliciesGuard, usuarios/empresas/establecimientos, GCS/archivos, notificaciones, reportes/exportación y scheduler para el uso del módulo?
 19. **Privacidad:** ¿Cuál es la base legal, retención, acceso, eliminación y manejo de incidentes para los datos personales confirmados? ¿Qué datos pueden utilizarse en QA?
-20. **Reportes y administración:** los campos, reportes, catálogos y parámetros funcionales están enumerados en la sección 14. ¿Qué roles pueden administrarlos, consultarlos y exportarlos, y qué restricciones de datos aplican?
+20. **Reportes y administración:** los campos, reportes, catálogos y parámetros funcionales están enumerados en las secciones 14 y “Cobertura funcional completa del requerimiento”. ¿Qué roles pueden administrarlos, consultarlos y exportarlos, y qué restricciones de datos aplican?
 21. **Aprobación y backlog:** ¿Qué work item, responsables de negocio/operación, aprobadores y fecha de aprobación deben asociarse a esta especificación?
 
 ## 19. Estado de aprobación
 
-- **Estado:** Borrador
+- **Estado:** BORRADOR
 - **Aprobadores:** Pendiente de identificar
 - **Fecha y observaciones:** 2026-09-30 — documento de arquitectura y dominio para revisión; propuestas e inferencias no aprobadas y preguntas abiertas.
 
@@ -324,3 +492,47 @@ Los flujos, vistas finales y perfiles de pantalla se documentarán en especifica
 | 0.1.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Primera especificación transversal de arquitectura y dominio; distingue confirmado, propuesto y pendiente. |
 | 0.2.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Reclasifica vencimientos, alertas, permisos, datos personales, reportes/administración y observación de Figma según el documento funcional oficial; mantiene pendientes los aspectos técnicos y operativos no definidos. |
 | 0.3.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Incorpora hallazgos del descubrimiento técnico de pec-api/pec-ui; clasifica capacidades PEC existentes, límites de reutilización, ausencia de implementación Lost & Found y preservación del estado de trabajo. |
+| 0.4.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Completa la cobertura de los trece módulos funcionales, estados requeridos, administración, reportes, reglas y componentes transversales; añade matriz final de trazabilidad y refuerza el límite entre ARCH-001 y DATA-001. |
+
+## Matriz de cobertura del requerimiento
+
+| Requerimiento | Sección ARCH-001 | Tratamiento | Estado |
+|---|---|---|---|
+| Registro inicial e ID Encuentra | Cobertura funcional completa §1; Estados §12 | Adaptar/extender PEC para contexto y archivos; capacidad de registro nueva | Cubierto; formato del ID y datos obligatorios pendientes |
+| Registro de artículo perdido | Cobertura funcional completa §2; Modelo conceptual §11 | Nuevo | Cubierto; reglas de edición/cierre y campos obligatorios pendientes |
+| Registro de artículo encontrado | Cobertura funcional completa §3; Estados §12 | Nuevo; reutilizar contexto de locales/usuarios PEC | Cubierto; duplicados e identificación física pendientes |
+| Registro de documentos y tarjetas | Cobertura funcional completa §4; Reglas RB-01; Datos personales §7 | Nuevo; adaptar archivos/contacto PEC | Cubierto; autocompletado e integración externa pendientes |
+| Cédula, licencia, pasaporte y carné | Cobertura funcional completa §4 | Catálogos nuevos o adaptados tras validar equivalencia | Cubierto |
+| Tarjeta bancaria, de afiliación y regalo | Cobertura funcional completa §4 | Catálogos nuevos o adaptados tras validar equivalencia | Cubierto |
+| Datos adicionales de documentos/tarjetas y posible autocompletado | Cobertura funcional completa §4 | Nuevo; integración pendiente de confirmar | Cubierto; fuente y contrato pendientes |
+| Enmascarar tarjeta: primeros 6 y últimos 4; nunca mostrar número completo | Reglas RB-01; Cobertura funcional completa §4; Seguridad | Regla funcional nueva, aplicable a todos los canales | Cubierto; tratamiento de números cortos y valor completo pendiente |
+| Búsqueda nacional entre locales | Cobertura funcional completa §5; Pantallas §16 | Búsqueda/identificación nueva; reutilizar autorización y referencias PEC | Cubierto; algoritmo, prioridad y límites de datos pendientes |
+| Validación con color, marca, contenido, características y detalles particulares | Cobertura funcional completa §6 | Nuevo; configurar preguntas propias | Cubierto; preguntas finales e intentos pendientes |
+| Resultados de coincidencia alta/media/baja | Cobertura funcional completa §6; Estados §12 | Nuevo | Cubierto; umbrales pendientes |
+| No mostrar respuestas previas; validación correcta permite entrega | Reglas RB-02; Cobertura funcional completa §6; Seguridad | Regla funcional nueva; aplicar autorización/protección PEC | Cubierto; controles técnicos específicos pendientes |
+| Entrega con cliente, artículo, local, responsable, fecha, hora y observaciones | Cobertura funcional completa §7 | Nuevo; reutilizar contexto de usuario/local | Cubierto |
+| Firmas de cliente y colaborador; generar acta y cargar acta firmada | Reglas RB-04; Cobertura funcional completa §7 | Flujo nuevo; adaptar infraestructura GCS/`sspectfile` | Cubierto; tipos de firma y flujo físico pendientes |
+| No cerrar entrega sin acta firmada y conservar trazabilidad | Reglas RB-04/RB-05; Cobertura funcional completa §7; Estados §12 | Regla nueva; requiere auditoría de negocio durable | Cubierto; mecanismo de auditoría pendiente |
+| Gestión de custodia y límite por posesión física | Reglas RB-03; Cobertura funcional completa §8; Roles §13 | Nuevo; reutilizar identidad/locales y extender autorización | Cubierto; acreditación de posesión y acuses pendientes |
+| Estados de custodia local, transferencia, GCSS y destrucción | Estados §12; Cobertura funcional completa §8 | Nuevo; no reutilizar estados de Quejas | Cubierto; secuencia/acuse y destino operativo pendientes |
+| Contacto automático por correo y gestión telefónica cuando existen datos | Cobertura funcional completa §9; Integraciones §14 | Adaptar/extender canales PEC; eventos/reglas nuevos | Cubierto; consentimiento, plantillas, frecuencia y reintentos pendientes |
+| Resultados de contacto: Contactado, No contesta, Número incorrecto, Se acercará al local | Estados §12; Cobertura funcional completa §9 | Nuevo | Cubierto |
+| Vencimiento de documentos: 1 mes local, transferencia, GCSS 3 meses y destrucción | Reglas RB-06; Estados §12; Cobertura funcional completa §10 | Jobs/reglas nuevos; scheduler adaptable | Cubierto; parámetros técnicos pendientes según RB-10 |
+| Vencimiento de artículos generales: 3 meses y correspondencia interna | Reglas RB-07; Estados §12; Cobertura funcional completa §10 | Jobs/reglas nuevos; scheduler adaptable | Cubierto; responsables y acuses pendientes |
+| Alimentos/comida rápida: hasta cierre, desecho con evidencia | Reglas RB-08; Cobertura funcional completa §10 | Regla/job nuevo; archivos PEC adaptables | Cubierto; evidencia operativa pendiente |
+| Alertas 3 días antes del vencimiento | Reglas RB-09; Cobertura funcional completa §10 | Scheduler y canales PEC adaptables; evento nuevo | Cubierto; inicio, zona horaria, fallos y parámetros pendientes |
+| Reportes de encontrados, perdidos, pendientes de entrega, próximos a vencer, transferidos, destruidos, documentos y tarjetas | Cobertura funcional completa §11; Integraciones §14 | Lógica Lost & Found nueva; exportación PEC reutilizable/adaptable | Cubierto; permisos/detalles técnicos pendientes |
+| Filtros por local, zona, fechas, tema y estado | Cobertura funcional completa §11 | Lógica de consulta nueva; adaptar datos/catálogos PEC cuando sean adecuados | Cubierto; fuente de zonas pendiente |
+| Exportación a Excel | Cobertura funcional completa §11; Integraciones §14 | Reutilizar/adaptar infraestructura ExcelJS/`xlsx`; lógica funcional nueva | Cubierto; backend/frontend y permisos pendientes |
+| Administración de temas y subtemas | Cobertura funcional completa §12 | Catálogos PEC adaptables, equivalencia semántica pendiente | Cubierto; reutilización por confirmar |
+| Administración de locales y zonas | Cobertura funcional completa §12; Integraciones §14 | Reutilizar establecimientos; zona pendiente de confirmar | Cubierto; fuente de zona pendiente |
+| Administración de tipos de identificación, canales, estados y roles | Cobertura funcional completa §12 | Canales/mecanismos PEC adaptables; tipos y estados nuevos; roles/extensión CASL | Cubierto; mapeos pendientes |
+| Administración de plantillas de correo y preguntas de validación | Cobertura funcional completa §12 | Canal email adaptable; administración de plantillas por confirmar; preguntas nuevas | Cubierto; ownership/configuración pendiente |
+| Administración de tiempo de custodia, tiempo de alertas, destinos y responsables | Cobertura funcional completa §12 | Parámetros Lost & Found nuevos; reutilizar referencias PEC cuando aplique | Cubierto; responsables, parametrización y destinos pendientes |
+| Administración de tipos de documentos y tarjetas | Cobertura funcional completa §12 | Catálogos propios o adaptados tras confirmar equivalencia | Cubierto; fuente/dueño pendiente |
+| Roles y matriz de permisos | Roles §13; Cobertura funcional completa §13 | Adaptar Keycloak y CASL/PoliciesGuard; permisos de negocio nuevos | Cubierto; mapeo y alcance contextual pendientes |
+| Estados Registrado, En custodia del local, Gestión de contacto, Cliente contactado, Entregado al cliente, Pendiente de transferencia, Transferido al GCSS, En custodia GCSS, Pendiente de destrucción, Destruido y Posible coincidencia | Estados §12; Cobertura funcional completa | Separar dimensiones; no reutilizar estado de Quejas | Cubierto; transiciones técnicas pendientes |
+| Dimensiones separadas de custodia, matching, validación, contacto, entrega y vencimiento | Estados §12 | Propuesta de arquitectura | Cubierto como propuesta; coordinación final pendiente |
+| Responsabilidades transversales de reglas, automatizaciones, búsqueda/identificación y auditoría/trazabilidad | Cobertura funcional completa — Componentes transversales; Decisiones §17 | Capacidades lógicas nuevas; no implica cuatro servicios físicos | Cubierto como recomendación arquitectónica |
+| Datos personales, logs, QA y permisos por rol/local | Datos personales §7; Cobertura funcional completa — Datos personales y seguridad; Roles §13 | Reutilizar autorización PEC y aplicar controles nuevos del módulo | Cobertura funcional presente; base legal, retención y controles por campo pendientes |
+| Figma y observación de Búsqueda Nacional incompleta | Pantallas §16; Cobertura funcional completa — Cobertura visual | Prototipo como referencia; defecto no es requisito | Cubierto; pantalla no define comportamiento esperado |
