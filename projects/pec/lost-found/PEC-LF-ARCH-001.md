@@ -10,7 +10,7 @@
 |---|---|
 | ID | `PEC-LF-ARCH-001` |
 | Título | Arquitectura y dominio de Artículos encontrados y declarados perdidos |
-| Versión | `1.0.0` |
+| Versión | `1.2.0` |
 | Autor | Mbrion / equipo PEC — por confirmar |
 | Fecha | `2026-09-30` |
 | Work item / backlog | Pendiente de referencia |
@@ -119,7 +119,7 @@ Los criterios de esta especificación verifican el resultado de arquitectura y d
 - Revisión de privacidad y controles para datos personales, tarjetas, respuestas, archivos, logs y QA en las Specs correspondientes.
 ## 10. Dependencias
 
-- **CONFIRMADO:** Keycloak/CASL/PoliciesGuard, usuarios, empresas, establecimientos, catálogo PEC, StorageService/GCS, correo/notificaciones, scheduler y exportación son capacidades existentes descritas en §14; Lost & Found las reutiliza según los límites del dominio.
+- **CONFIRMADO:** Keycloak/CASL/PoliciesGuard, usuarios, empresas, establecimientos, infraestructura técnica de catálogo PEC, StorageService/GCS, correo/notificaciones, scheduler y exportación son capacidades existentes descritas en §14. Los catálogos maestros funcionales Lost & Found son independientes del catálogo actual de otros módulos; las demás capacidades se reutilizan/adaptan según sus límites de dominio.
 - **CONFIRMADO:** los destinos GCSS/correspondencia se integran mediante establecimientos, usuarios PEC, ItemTransfer y evidencia.
 - **CONFIRMADO:** servicio externo de autocompletado del cliente existe y se contempla como integración con fallback manual.
 - **PENDIENTE DE DEFINICIÓN:** mecanismo técnico de firma, matching exacto, transcripción y contrato del servicio de cliente, además del detalle asignado a Specs funcionales posteriores (ver §18).
@@ -129,7 +129,7 @@ Los criterios de esta especificación verifican el resultado de arquitectura y d
 
 - **CONFIRMADO:** `LostItemReport` es la declaración de pérdida y `FoundItem` el artículo físico. Son conceptos separados y pueden existir de forma independiente.
 - **CONFIRMADO:** `ItemMatch` persistente relaciona reportes y artículos N:M; `LostItemReport 1:N ItemMatch` y `FoundItem 1:N ItemMatch`. Estados controlados POSSIBLE, CONFIRMED y DISCARDED; admite origen manual o automático y conserva score, nivel y método conceptuales. Confirmar match no confirma propiedad ni entrega.
-- **CONFIRMADO:** Búsqueda Nacional es query/capacidad, no entidad persistente; filtra texto, tema, subtema, fecha, local, estado y número de identificación del cliente/reportante; resultados seguros sin información sensible.
+- **CONFIRMADO:** Búsqueda Nacional es query/capacidad, no entidad persistente; filtra texto, niveles de clasificación categoría/tema/subtema derivados de `LostFoundCatalogOption.parentId`, fecha, local, estado y número de identificación del cliente/reportante; resultados seguros sin información sensible.
 - **CONFIRMADO:** `RecoveryClaim` modela que una persona reclame un `FoundItem`; puede nacer desde reporte+ItemMatch o directamente sin reporte. Un artículo puede tener varios reclamos.
 - **CONFIRMADO:** `OwnershipValidation`, `ContactAttempt` e `ItemDelivery` se asocian con `RecoveryClaim`. Custodia conserva custodio actual en FoundItem y movimientos históricos en CustodyMovement. ItemTransfer es proceso propio distinto de movimiento.
 - **CONFIRMADO:** Finder no es entidad inicial; datos y snapshot quedan en FoundItem. DocumentDetail y CardDetail son detalles opcionales del artículo.
@@ -145,9 +145,9 @@ Los criterios de esta especificación verifican el resultado de arquitectura y d
 | Contacto | Intentos MANUAL/AUTOMATIC asociados al reclamo y resultados controlados | CONFIRMADO |
 | Custodia y transferencia | Custodio actual, historial de movimientos, transferencia con despacho/recepción y políticas de vencimiento | CONFIRMADO |
 | Entrega/disposición | Entrega con validación y acta; disposición final con evidencia | CONFIRMADO |
-| Administración | Catálogos, zonas, preguntas, políticas y tipos propios según §14 | CONFIRMADO |
+| Administración | Catálogos Lost & Found, jerarquía/opciones, zonas, preguntas, políticas y tipos propios según §14 | CONFIRMADO |
 | Reportes | Consultas sobre modelo transaccional y exportación Excel | CONFIRMADO |
-| Capacidades PEC compartidas | Usuarios, empresas, locales, catálogos, archivos, notificaciones, seguridad y exportación | CONFIRMADO técnicamente; aplicación indicada en §14 |
+| Capacidades PEC compartidas | Usuarios, empresas, locales, infraestructura técnica de catálogo PEC, archivos, notificaciones, seguridad y exportación | Existencia técnica confirmada; no reutilizar `sspectcatalog` como catálogo funcional Lost & Found. Usar `LostFoundCatalog` / `LostFoundCatalogOption` propios. |
 
 ### Integridad conceptual
 
@@ -202,7 +202,7 @@ Hallazgos técnicos PEC confirmados y resolución arquitectónica para Lost & Fo
 | Autenticación/autorización | Keycloak; AuthGuard obtiene preferred_username y contexto de usuario/rol; CASL + PoliciesGuard | Reutilizar/extender. Roles funcionales y autorización contextual por establecimiento/custodia aplican también en backend. |
 | Usuarios/empresa/establecimiento | UserEnterpriseRole, UserEstablishment, `sspectuser`, `sspectenterprise`, `sspectestablishment`; empresa, ciudad/región | Reutilizar referencias PEC. Guardar enterprise_id en raíces/transaccionales principales; consistencia con establecimiento. |
 | Zonas | PEC tiene `id_zona` regional pero no un dominio Zone completo | LostFoundZone + LostFoundEstablishmentZone para ubicaciones internas. No reutilizar `id_zona` territorial. |
-| Catálogos | Existe infraestructura técnica de catálogos | Reutilizar la infraestructura con valores propios Lost & Found para temas/subtemas; no asumir semántica de Quejas. Estados no son catálogo libre. |
+| Catálogos | Existe infraestructura técnica de catálogos PEC | Lost & Found tendrá `LostFoundCatalog` + `LostFoundCatalogOption` independiente; no reutilizar el catálogo funcional actual. Clasificación jerárquica categoría → tema → subtema; estados controlados no son catálogo libre. |
 | Archivos | StorageService y Google Cloud Storage, servicios/endpoints protegidos; asociaciones actuales específicas a Quejas | Reutilizar almacenamiento. `sspectlffile` y asociaciones Lost & Found propias; no añadir FKs del módulo a `sspectfile`. |
 | Notificación/email | Canales in-app/email y procesadores por evento | Reutilizar mecanismo/canales y extender con eventos del módulo; plantillas y configuración Lost & Found propias. |
 | Auditoría | Hay logs técnicos y campos created/modified en algunos modelos; no historial genérico de auditoría de dominio encontrado | `LostFoundAudit` durable de negocio requerido, además de CustodyMovement/ItemTransfer/ItemDelivery/ItemDisposal. Logs no sustituyen auditoría. |
@@ -216,22 +216,26 @@ Hallazgos técnicos PEC confirmados y resolución arquitectónica para Lost & Fo
 
 ### Implementación Lost & Found existente
 
-**CONFIRMADO:** el descubrimiento no encontró modelos, endpoints, servicios, rutas ni componentes PEC específicos de Lost & Found para artículos perdidos/encontrados, custodia, matching, validación, entrega o disposición.
+**INTERFAZ EXISTENTE — CONFIRMADO:** `pec-ui` ya contiene un módulo visual Lost & Found con navegación y pantallas para resumen, registro de artículo perdido, registro de artículo encontrado, contactos y vencimientos. Los formularios incluyen avances de autocompletado de colaborador y cliente; el registro de pérdida incluye selector de establecimiento. Resumen, contactos y vencimientos utilizan datos mock. La clasificación usa listas locales de tema/subtema y el registro de encontrado usa zonas locales fijas. Esta interfaz es parcial y no constituye una implementación funcional de punta a punta.
+
+**INTEGRACIÓN FUNCIONAL PENDIENTE:** los formularios de pérdida y hallazgo tienen «Guardar» deshabilitado, no persisten registros ni llaman a una API Lost & Found. El registro de encontrado muestra el local de forma informativa, pero todavía no selecciona ni envía `establishmentId`; su autocompletado de colaborador aún no persiste el snapshot. Falta conectar catálogo jerárquico, zonas por establecimiento, archivos con metadata Lost & Found, políticas de custodia, auditoría y permisos backend. Búsqueda nacional, custodia y reportes no tienen operación completa.
+
+**BACKEND ESPECÍFICO INEXISTENTE:** `pec-api` aún no contiene modelos Prisma, migraciones, endpoints ni servicios de dominio Lost & Found. Existen capacidades PEC reutilizables: Keycloak/AuthGuard, CASL/PoliciesGuard, DatabaseModule/DatabaseService, servicios de establecimientos y colaboradores, y StorageService/GCS. La implementación debe reutilizar `DatabaseModule`/`DatabaseService`; no crear un `PrismaClient` adicional por módulo.
 
 ### Administración y reportes funcionales
 
-**CONFIRMADO:** administración comprende temas/subtemas, establecimientos, zonas internas, tipos de identificación, canales, estados controlados, roles, plantillas propias de correo, preguntas de validación, tipos de documentos/tarjetas y CustodyPolicy versionada (tiempos, destinos y responsables). Usuarios responsables referencian `sspectuser`.
+**CONFIRMADO:** administración comprende catálogos Lost & Found y opciones con jerarquía/orden/activación, establecimientos, zonas internas, tipos de identificación, estados controlados, roles, plantillas propias de correo, preguntas de validación y CustodyPolicy versionada. Clasificación, tipos de documento/tarjeta y canales son catálogos administrables propios; usuarios responsables referencian `sspectuser`. La interfaz puede especializarse por `catalog.code`, sin pantalla obligatoria por catálogo.
 
-**CONFIRMADO:** reportes de encontrados/perdidos, pendientes de entrega, próximos a vencer, transferidos, destruidos, documentos y tarjetas; filtros por establecimiento, zona, fechas, tema y estado; exportación Excel. No se crean tablas de reporting iniciales.
+**CONFIRMADO:** reportes de encontrados/perdidos, pendientes de entrega, próximos a vencer, transferidos, destruidos, documentos y tarjetas; filtros por establecimiento, zona, fechas, clasificación (categoría/tema/subtema derivada de `LostFoundCatalogOption`) y estado; exportación Excel. No se crean tablas de reporting iniciales.
 ## 15. Contratos / API (cuando aplique)
 
 No se definen rutas, endpoints, eventos ni esquemas de API en esta especificación de arquitectura. Su diseño queda **FUERA DE ALCANCE** en esta etapa. Antes de especificarlos, resolver límites de dominio, permisos, relaciones, estados y contratos de las integraciones investigadas.
 
 ## 16. Pantallas afectadas (cuando aplique)
 
-**CONFIRMADO:** existe un prototipo funcional de Figma como referencia de UX/UI para el módulo. En `pec-ui`, Keycloak frontend está integrado, los módulos se cargan lazy, se usan Angular Material + Fuse + Tailwind, formularios reactivos y servicios HTTP mediante `HttpClient`; también existe infraestructura de archivos. No existe actualmente módulo ni ruta Lost & Found.
+**CONFIRMADO:** existe un prototipo de Figma como referencia de UX/UI. En `pec-ui` ya existe un módulo visual Lost & Found con rutas y pantallas parciales para resumen, registro de pérdida, registro de hallazgo, contactos y vencimientos. Usa la infraestructura frontend PEC (Keycloak, carga lazy, Angular Material, Fuse, Tailwind y formularios reactivos), pero todavía requiere integración con APIs y persistencia reales. El estado concreto se detalla en §14.
 
-**CONFIRMADO:** el nuevo módulo se implementará como feature aislada y no como extensión interna del módulo de quejas.
+**CONFIRMADO:** la feature Lost & Found se mantiene aislada del módulo de Quejas. Sprint 1 adapta la interfaz existente a los contratos backend y al modelo aprobado; no parte desde cero en UI.
 
 **OBSERVACIÓN DEL PROTOTIPO — no es comportamiento esperado:** la opción “Búsqueda Nacional” muestra navegación/pantalla incompleta en el prototipo. El comportamiento funcional debe derivarse del documento funcional (buscar artículos de cualquier local, con sus filtros y campos de resultado confirmados), no de esa pantalla incompleta.
 
@@ -247,14 +251,14 @@ Las trece capacidades funcionales confirmadas y sus límites arquitectónicos so
 | 2 | Artículo perdido | `LostItemReport` es declaración independiente; admite descripción de texto o voz, snapshots del reportante y adjuntos. |
 | 3 | Artículo encontrado | `FoundItem` representa el objeto físico; custodio actual, zona interna, finder snapshot y política aplicada quedan asociados al artículo. |
 | 4 | Documentos y tarjetas | `DocumentDetail`/`CardDetail` opcionales; número de tarjeta nunca completo, se muestran solo primeros seis y últimos cuatro dígitos. |
-| 5 | Búsqueda nacional | Query nacional con filtros texto, tema, subtema, fecha, local, estado e identificación del reportante; resultados seguros. |
+| 5 | Búsqueda nacional | Query nacional con filtros de texto, jerarquía de clasificación (categoría/tema/subtema), fecha, local, estado e identificación del reportante; los niveles se derivan de `LostFoundCatalogOption.parentId`; resultados seguros. |
 | 6 | Matching y validación de propiedad | `ItemMatch` persistente/manual o automático; match no acredita propiedad. `RecoveryClaim` inicia validaciones protegidas. |
 | 7 | Entrega del artículo | `ItemDelivery` asociada a reclamación; requiere validación aprobada y acta firmada cargada. |
 | 8 | Custodia y transferencia | CustodyMovement conserva historia; ItemTransfer es proceso propio; solo establecimiento poseedor modifica custodia. GCSS es establecimiento PEC. |
 | 9 | Contacto automático | ContactAttempt pertenece a RecoveryClaim, clasifica manual/automático y guarda resultados controlados; PEC in-app/email son canales integrados. |
 | 10 | Vencimientos | CustodyPolicy versionada: documentos 30 días local + 90 días GCSS; generales 90 días; alimentos hasta cierre y desecho con evidencia; alerta tres días antes. |
-| 11 | Reportes | Consultas transaccionales de encontrados/perdidos, entrega, próximos a vencer, transferidos, destruidos, documentos y tarjetas; filtros por establecimiento/zona/fechas/tema/estado; Excel. |
-| 12 | Administración | Temas/subtemas usando infraestructura de catálogos PEC; zonas internas propias; tipos de identificación PEC; canales/estados controlados; roles, plantillas propias, preguntas, CustodyPolicy, destinos y responsables PEC; tipos de documento y tarjeta propios. |
+| 11 | Reportes | Consultas transaccionales de encontrados/perdidos, entrega, próximos a vencer, transferidos, destruidos, documentos y tarjetas; filtros por establecimiento/zona/fechas y clasificación (categoría/tema/subtema derivada de la jerarquía); Excel. |
+| 12 | Administración | Catálogos y opciones Lost & Found independientes, con jerarquía, orden y activación/desactivación; zonas internas propias; tipo de identificación PEC; estados controlados; roles, plantillas propias, preguntas, CustodyPolicy, destinos y responsables PEC. |
 | 13 | Roles y permisos | Matriz funcional §13, Keycloak + CASL/PoliciesGuard y autorización backend contextual; custodia restringida al local poseedor. |
 
 ### Responsabilidades transversales
@@ -275,7 +279,7 @@ Las trece capacidades funcionales confirmadas y sus límites arquitectónicos so
 | Mantener custodio actual en FoundItem, movimientos históricos separados e ItemTransfer como proceso propio | CONFIRMADO | Actualización consistente; GCSS es establecimiento PEC. |
 | RecoveryClaim como raíz para contactos, validaciones y entrega | CONFIRMADO | Puede originarse por coincidencia o directamente sobre artículo. |
 | CustodyPolicy versionada y almacenamiento de versión aplicada + expirationDate | CONFIRMADO | Parámetros funcionales de vencimiento están en RB-06 a RB-10. |
-| Reutilizar infraestructura PEC indicada en §14 y mantener lógica/metadata de dominio propia | CONFIRMADO | Keycloak/CASL, usuarios, establecimientos, catálogos, StorageService/GCS, notificaciones, scheduler y Excel; no lógica de Quejas. |
+| Usar catálogo maestro jerárquico propio de Lost & Found y mantener lógica/metadata de dominio propia | CONFIRMADO | `LostFoundCatalog` + `LostFoundCatalogOption` son independientes del catálogo funcional PEC actual; otras capacidades PEC (Keycloak/CASL, usuarios, establecimientos, StorageService/GCS, notificaciones, scheduler y Excel) se reutilizan/adaptan según §14; no lógica de Quejas. |
 | Exigir LostFoundAudit de negocio durable además de eventos transaccionales | CONFIRMADO | Los logs técnicos PEC no sustituyen auditoría de dominio. |
 | Mantener ARCH-001 arquitectónico y DATA-001 lógico | CONFIRMADO | Esta spec no aprueba tablas, columnas, modelos Prisma, endpoints, migraciones o componentes. |
 | Preservar el estado de trabajo existente de pec-api y pec-ui | CONFIRMADO | Antes de implementación futura, revisar git status y preservar archivos modificados/no versionados. |
@@ -304,6 +308,8 @@ La consolidación de §21 y `PEC-LF-DATA-001 §22` resolvió las preguntas de do
 | 0.4.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Completa la cobertura de los trece módulos funcionales, estados requeridos, administración, reportes, reglas y componentes transversales; añade matriz final de trazabilidad y refuerza el límite entre ARCH-001 y DATA-001. |
 | 0.5.0 | 2026-09-30 | Mbrion / equipo PEC — por confirmar | Consolidación de decisiones arquitectónicas y de modelo aprobadas durante revisión funcional/técnica. Se cierran relaciones, responsabilidades y requisitos que antes aparecían como pendientes; se mantienen únicamente los pendientes enumerados en §18. |
 | 1.0.0 | 2026-09-30 | Walter Molina | Aprobación de arquitectura y dominio Lost & Found por Walter Molina. |
+| 1.1.0 | 2026-10-03 | Walter Molina | Se adopta catálogo maestro jerárquico independiente de Lost & Found para clasificación y catálogos simples administrables. |
+| 1.2.0 | 2026-10-04 | Walter Molina | Se actualiza el estado real de implementación: pec-ui ya contiene interfaz parcial Lost & Found; backend de dominio y persistencia continúan pendientes. |
 
 ## Matriz de cobertura del requerimiento
 
@@ -333,12 +339,12 @@ Este resumen reúne las decisiones desarrolladas en las secciones anteriores. AR
 ### Decisiones confirmadas
 
 - **Dominio:** `LostItemReport` es la declaración de pérdida y `FoundItem` el artículo físico; son conceptos separados e independientes. `ItemMatch` persistente establece una relación N:M y solo representa candidato. Match confirmado no equivale a propiedad validada ni entrega. `RecoveryClaim` registra el reclamo y puede existir sin reporte de pérdida.
-- **Búsqueda e identificación:** Búsqueda Nacional es una query, no entidad. Incluye filtros de texto, tema, subtema, fecha, local, estado y número de identificación del reportante; los resultados deben excluir información sensible. ItemMatch admite flujos manual y automático; matching inicial basado en reglas, con score/nivel/método conceptuales.
+- **Búsqueda e identificación:** Búsqueda Nacional es una query, no entidad. Incluye filtros de texto, clasificación (categoría/tema/subtema derivados de `LostFoundCatalogOption.parentId`), fecha, local, estado y número de identificación del reportante; los resultados deben excluir información sensible. ItemMatch admite flujos manual y automático; matching inicial basado en reglas, con score/nivel/método conceptuales.
 - **Custodia y transferencias:** el artículo conserva establecimiento custodio actual; los movimientos guardan historia. `ItemTransfer` es un proceso distinto que, al recibirse, refleja el movimiento y cambio de custodio. GCSS es un establecimiento PEC. Solo el establecimiento con posesión física puede cambiar custodia.
 - **Reclamo, contacto y validación:** `RecoveryClaim` puede tener varios intentos de contacto y validación; contacto separa MANUAL/AUTOMATIC, resultados controlados, máximo tres intentos automáticos y N manuales. Las referencias de validación no se exponen antes de recibir la respuesta. Validación requerida habilita entrega, no la ejecuta.
 - **Entrega/disposición:** `ItemDelivery` final válida es cero o una por reclamación; requiere validación y acta firmada. `ItemDisposal` cierra el ciclo sin entrega, con tipos destruido/desechado y evidencia; artículo e historia se conservan.
 - **Especialización y zonas:** documentos y tarjetas son detalles opcionales de FoundItem; nunca se muestra PAN completo, solo primeros seis/últimos cuatro dígitos. Finder no es entidad inicial: snapshot en FoundItem. Zona significa ubicación interna del establecimiento, mediante catálogo Lost & Found y asociación a locales, no `id_zona` geográfico.
-- **PEC:** reusar infraestructura de catálogos, establecimientos, usuarios, Keycloak/CASL, StorageService/GCS, notificaciones/correo, scheduler y exportación según las restricciones de DATA-001. Temas/subtemas, plantillas y configuraciones son propios del módulo; no reutilizar semántica de Quejas. Metadata/asociaciones de archivos son propias del dominio (`sspectlffile` lógico), separadas de `sspectfile`.
+- **PEC:** usar catálogos maestros propios Lost & Found (`LostFoundCatalog` / `LostFoundCatalogOption`); no reutilizar `sspectcatalog` como catálogo funcional. Reutilizar/adaptar establecimientos, usuarios, Keycloak/CASL, StorageService/GCS, notificaciones/correo, scheduler y exportación según DATA-001. La clasificación y demás configuraciones son propias del módulo; no reutilizar semántica de Quejas. Metadata/asociaciones de archivos son propias del dominio (`sspectlffile` lógico), separadas de `sspectfile`.
 - **Auditoría y estados:** auditoría genérica durable de negocio complementa movimientos/transferencias/entregas/disposiciones; logs técnicos no la sustituyen. Estados son dimensiones separadas, controladas por dominio y no reutilizan semántica de Quejas.
 - **Identidad y responsables:** ID Encuentra e itemCode son identificadores funcionales generados, independientes de PK física. Actores responsables referencian usuarios PEC; no hay persona/entidad Responsible ni texto libre.
 - **Políticas y reportes:** CustodyPolicy se versiona; cambios no recalculan históricos y se conserva `expirationDate` aplicada. Plazos confirmados: documentos 30 días en local + 90 días en GCSS + destrucción; generales 90 días + correspondencia/transferencia configurada; alimentos hasta cierre + desecho con evidencia; alertas tres días antes. Reportes consultan modelo transaccional sin tablas de reporting iniciales, con filtros y exportación Excel; reutilizar infraestructura PEC, no la lógica de Quejas.

@@ -19,10 +19,10 @@
 |---|---|
 | ID | `PEC-LF-DATA-001` |
 | Título | Modelo lógico de datos — Artículos encontrados y declarados perdidos |
-| Versión | `1.0.0` |
+| Versión | `1.2.0` |
 | Estado | `APPROVED` |
 | Autor | Mbrion / equipo PEC |
-| Fecha | `2026-09-30` |
+| Fecha | `2026-10-05` |
 | Arquitectura relacionada | `PEC-LF-ARCH-001` |
 | Work item / backlog | Pendiente de referencia |
 
@@ -192,7 +192,7 @@ Modelo PEC: `sspectuser`; PK `sspecrpkuse`.
 
 ## 5.4 Archivos
 
-**CONFIRMADO:** PEC cuenta con StorageService y Google Cloud Storage. Lost & Found tendrá metadata conceptual propia `sspectlffile`, independiente de `sspectfile`, y asociaciones específicas del dominio: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcionalmente `OwnershipValidationFile`. No añadir FKs Lost & Found a `sspectfile`. Permisos por recurso, retención y acceso quedan para definición técnica posterior.
+**CONFIRMADO:** PEC cuenta con StorageService y Google Cloud Storage. Lost & Found reutiliza las políticas técnicas vigentes de PEC para extensiones, MIME, tamaños, límites y seguridad de la carga. `PHOTO` y `EVIDENCE` son clasificaciones funcionales del archivo, no reglas técnicas de formato. Lost & Found tendrá metadata conceptual propia `sspectlffile`, independiente de `sspectfile`, y asociaciones específicas del dominio: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcionalmente `OwnershipValidationFile`. No añadir FKs Lost & Found a `sspectfile`. Permisos por recurso, retención y acceso quedan para definición técnica posterior.
 
 ---
 
@@ -202,17 +202,17 @@ Los nombres físicos siguientes son referencias candidatas al patrón PEC, no ap
 
 ## 6.1 `LostItemReport` — `sspectlostitemreport` (candidato)
 
-Representa la declaración de pérdida, no el artículo físico. Tiene identificador funcional generado `idEncuentra` separado de la PK (`LF-L-AAAA-XXXXXX`, formato ajustable antes de implementar), empresa, establecimiento que registra/consulta cuando aplica, tema/subtema, descripción, lugar/fecha aproximados, canal, fecha/hora y usuario registrador. Conserva snapshot del reportante (identificación, nombres, apellidos y contacto) y puede asociar archivos propios, incluyendo audio si la declaración es por voz.
+Representa la declaración de pérdida, no el artículo físico. Tiene identificador funcional generado `idEncuentra` separado de la PK (`LF-L-AAAA-XXXXXX`, formato ajustable antes de implementar), empresa, establecimiento que registra/consulta cuando aplica, opción de clasificación Lost & Found, descripción, lugar/fecha aproximados, canal, fecha/hora y usuario registrador. Los niveles categoría/tema/subtema se obtienen recorriendo la jerarquía de opciones. Conserva snapshot del reportante (identificación, nombres, apellidos y contacto) y puede asociar archivos propios, incluyendo audio si la declaración es por voz.
 
-Relaciones: empresa N:1; establecimiento de registro N:1 cuando aplique; `LostItemReport 1:N ItemMatch`; `LostItemReport 1:N LostItemReportFile`.
+Relaciones: empresa N:1; establecimiento de registro N:1 cuando aplique; opción de clasificación Lost & Found según corresponda; opción `LOST_FOUND_CHANNEL`; `LostItemReport 1:N ItemMatch`; `LostItemReport 1:N LostItemReportFile`.
 
 ## 6.2 `FoundItem` — `sspectfounditem` (candidato)
 
-Representa el artículo físico encontrado. Incluye `itemCode` generado independientemente de PK física (`LF-F-AAAA-XXXXXX`, formato ajustable), `enterprise_id`, tema/subtema, descripción/categoría, lugar/fecha de hallazgo, zona interna, estado/custodia por dimensiones, usuario registrador, `currentEstablishmentId` como custodio físico actual, `expirationDate` y snapshot/version de CustodyPolicy aplicada.
+Representa el artículo físico encontrado. Incluye `itemCode` generado en backend e independiente de la PK física (formato lógico inicial `LF-F-AAAA-XXXXXX`), `enterprise_id`, `classificationOptionId`, descripción, lugar del hallazgo, `foundAt`, `foundTimeKnown`, `zoneId` obligatorio, estado/custodia por dimensiones, usuario registrador, `currentEstablishmentId` como custodio físico actual, `custodyPolicyId` y `expirationDate` cuando aplique. `classificationOptionId` referencia una opción activa de `LOST_FOUND_CLASSIFICATION` del mismo enterprise; los niveles presentes de categoría/tema/subtema se derivan recorriendo `parentId`.
 
-Relaciones: empresa N:1; establecimiento custodio actual N:1; usuario creador N:1; zona interna N:1; `FoundItem 1:N ItemMatch`, `RecoveryClaim`, `CustodyMovement`, `ItemTransfer`, `FoundItemValidationReference` y archivos; `FoundItem 0..1 DocumentDetail`, `0..1 CardDetail` y `0..1 ItemDisposal`.
+Relaciones: empresa N:1; establecimiento custodio actual N:1; usuario creador N:1; zona interna N:1 mediante `zoneId`; `CustodyPolicy` N:1 mediante `custodyPolicyId`; `classificationOptionId` N:1 a una opción del catálogo `LOST_FOUND_CLASSIFICATION`; `FoundItem 1:N ItemMatch`, `RecoveryClaim`, `CustodyMovement`, `ItemTransfer`, `FoundItemValidationReference` y `FoundItemFile`; `FoundItem 0..1 DocumentDetail`, `0..1 CardDetail` y `0..1 ItemDisposal`.
 
-**CONFIRMADO:** temas/subtemas usan la infraestructura de catálogos PEC con valores propios del módulo; `currentEstablishmentId` es custodio actual; Finder no es entidad inicial y sus datos históricos se guardan como snapshot; los estados se separan por dimensión.
+**CONFIRMADO:** `classificationOptionId` apunta al nodo final válido de una opción activa de `LOST_FOUND_CLASSIFICATION` del mismo enterprise y debe cumplir su jerarquía flexible de hasta tres niveles; categoría/tema/subtema son niveles derivados cuando existan. `currentEstablishmentId` es custodio actual; Finder no es entidad inicial y sus datos históricos se guardan como snapshot; los estados se separan por dimensión y el inicial del artículo es `REGISTERED`.
 
 ## 6.3 `ItemMatch` — `sspectitemmatch` (candidato)
 
@@ -230,7 +230,7 @@ Relaciones: N:1 `FoundItem`; asociación opcional al reporte/match de origen; `R
 
 La validación pertenece a un reclamo: `RecoveryClaim 1:N OwnershipValidation`. No depende de `ItemMatch`.
 
-- `ValidationQuestion`: configuración administrable asociable a tema/subtema, con active, order, required y questionType cuando aplique.
+- `ValidationQuestion`: configuración administrable asociable a opciones de clasificación (categoría/tema/subtema), con active, order, required y questionType cuando aplique.
 - `FoundItemValidationReference`: valores privados de referencia asociados al artículo y a una pregunta; no mostrarlos al reclamante antes de que responda.
 - `OwnershipValidation`: cada intento/resultados `HIGH_MATCH`, `MEDIUM_MATCH`, `LOW_MATCH`.
 - `OwnershipValidationAnswer`: respuesta del reclamante, FK lógica a pregunta y snapshot del texto exacto presentado.
@@ -263,17 +263,19 @@ Cierre definitivo sin entrega; `FoundItem 0..1 ItemDisposal`. Tipos controlados 
 
 Detalles opcionales del artículo base: `FoundItem 0..1 DocumentDetail`; `FoundItem 0..1 CardDetail`.
 
-`DocumentDetail` conserva tipo de documento físico, número y datos del titular cuando apliquen. `CardDetail` conserva banco, tipo, primeros seis y últimos cuatro dígitos; nunca se muestra el número completo. No confundir tipo de identificación personal `public."documentType"` (DNI, PASSPORT, RUC, CI, ANONIMO) con tipo de documento físico Lost & Found.
+`DocumentDetail` conserva referencia a opción de `LOST_FOUND_DOCUMENT_TYPE`, número y datos del titular cuando apliquen. `CardDetail` conserva banco, referencia a opción de `LOST_FOUND_CARD_TYPE` y primeros seis/últimos cuatro dígitos; nunca se muestra el número completo. No confundir tipo de identificación personal `public."documentType"` (DNI, PASSPORT, RUC, CI, ANONIMO) con tipo de documento físico Lost & Found.
 
 ## 6.12 Zonas internas
 
-`LostFoundZone` es catálogo lógico global de ubicaciones internas del establecimiento (Servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas, entrada principal, etc.). `LostFoundEstablishmentZone` habilita la relación entre establecimiento y zonas disponibles. Cada establecimiento utiliza solo zonas asociadas y `FoundItem` referencia la zona correspondiente. No derivar de Region/`id_zona`, no usar snapshot territorial ni modelar zona geográfica para esta función.
+`LostFoundZone` es catálogo lógico global de ubicaciones internas del establecimiento (Servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas, entrada principal, etc.). `LostFoundEstablishmentZone` habilita la relación entre establecimiento y zonas disponibles. Al registrar, `FoundItem.zoneId` es obligatorio y referencia una zona activa, habilitada para `currentEstablishmentId` mediante una relación activa `LostFoundEstablishmentZone`. No se permite `FoundItem` sin `zoneId`; si el establecimiento no tiene zonas configuradas y activas, la capa funcional bloquea el registro. No derivar de Region/`id_zona`, no usar snapshot territorial ni modelar zona geográfica para esta función.
 
 ## 6.13 `CustodyPolicy`
 
-Configuración aprobada, no hardcodeada y versionada: categoría/tipo, días de custodia local/central, días de alerta, establecimiento destino, usuario responsable cuando aplique, acción final, requiere transferencia/evidencia, activo y versión. Al crear/aplicar una política, conservar en `FoundItem`/caso la versión aplicada y `expirationDate`. Cambios futuros de política no recalculan automáticamente registros históricos.
+Configuración aprobada, no hardcodeada y versionada mediante registros inmutables. Cada registro de `CustodyPolicy` representa una versión concreta; una nueva configuración crea otro registro y no modifica el histórico referenciado por `FoundItem`. Conceptualmente puede contemplar `policyCode`, `classificationOptionId` opcional, tipo funcional aplicable, parámetros de custodia, `destinationEstablishmentId`, `responsibleUserId` cuando aplique, `finalAction`, `requiresTransfer`, `requiresEvidence`, `active` y `version`. No se definen aquí columnas físicas finales.
 
-Valores: documentos 30 días en local, transferencia a GCSS, 90 días en GCSS y destrucción; artículos generales 90 días antes de correspondencia/transferencia configurada; alimentos hasta cierre del local y desecho con evidencia; alerta tres días antes. Solo detalles de cómputo y operación expresamente pendientes quedan abiertos en ARCH-001.
+Al registrar `FoundItem`, se selecciona una política activa aplicable en este orden: (1) específica del `classificationOptionId` validado; (2) por tipo funcional; (3) `GENERAL`. Si ninguna aplica, se bloquea el registro. `FoundItem` conserva `custodyPolicyId` del registro inmutable aplicado y `expirationDate` cuando corresponda. Nuevas versiones no cambian `custodyPolicyId` ni recalculan `expirationDate` de artículos históricos.
+
+Referencias funcionales iniciales: `DOCUMENT` — 30 días en local, transferencia a GCSS, 90 días adicionales en GCSS y destrucción según el flujo aprobado; `FOOD` — hasta el cierre del local y desecho con evidencia; `GENERAL` — 90 días y luego correspondencia/transferencia configurada. La alerta tres días antes se conserva como referencia del modelo. Los detalles técnicos de cómputo y operación permanecen para el Plan técnico.
 
 ## 6.14 `LostFoundAudit` — `sspectlfaudit` (candidato)
 
@@ -283,15 +285,23 @@ Auditoría genérica durable de negocio para Lost & Found. Registra como mínimo
 
 # 7. Asociaciones con archivos
 
-**CONFIRMADO:** metadata independiente `sspectlffile`, almacenamiento compartido con PEC StorageService/Google Cloud Storage y asociaciones específicas Lost & Found: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcional `OwnershipValidationFile`. No agregar FKs de Lost & Found a `sspectfile` ni reutilizar asociaciones de Quejas. La política de retención/borrado físico de archivos se define separadamente.
+**CONFIRMADO:** metadata independiente `sspectlffile`, almacenamiento compartido con PEC StorageService/Google Cloud Storage y asociaciones específicas Lost & Found: `FoundItemFile`, `LostItemReportFile`, `DeliveryFile`, `TransferFile`, `DisposalFile` y opcional `OwnershipValidationFile`. Se reutilizan las reglas técnicas PEC de extensiones, MIME, tamaños, límites y seguridad; `PHOTO` / `EVIDENCE` solo indican propósito funcional. No agregar FKs de Lost & Found a `sspectfile` ni reutilizar asociaciones de Quejas. La política de retención/borrado físico de archivos se define separadamente.
 
 ---
 
 # 8. Catálogos y configuración
 
-**CONFIRMADO:** reutilizar infraestructura de catálogo PEC para temas/subtemas, con valores semánticos propios de Lost & Found. No asumir valores de Quejas. Reutilizar `public."documentType"` solo para identificación de cliente/reportante. Mantener propios los tipos de documento físico y tarjeta, preguntas de validación, `LostFoundZone` y `CustodyPolicy`.
+**CONFIRMADO:** Lost & Found tendrá infraestructura maestra de catálogos independiente del catálogo funcional actual de otros módulos PEC. No reutilizar `sspectcatalog` como catálogo funcional Lost & Found. Modelo conceptual: `LostFoundCatalog 1:N LostFoundCatalogOption`; nombres físicos candidatos `sspectlfcatalog` y `sspectlfcatalogoption`, sin crear tablas, modelos Prisma ni migraciones en esta especificación.
 
-Canales controlados: Presencial, Teléfono, Chat, Correo electrónico, Redes sociales y App móvil. Estados son valores de dominio controlados y no se crean libremente. Destinos físicos usan `sspectestablishment`; destinos lógicos se expresan mediante reglas/proceso. Responsables se referencian por `sspectuser`; no texto libre ni entidad `Responsible`.
+`LostFoundCatalog` contiene conceptualmente `id`, `code`, `name`, `description`, `enterpriseId`, `active` y campos estándar PEC de auditoría/versionado. `code` identifica el catálogo funcional. Catálogos iniciales: `LOST_FOUND_CLASSIFICATION`, `LOST_FOUND_DOCUMENT_TYPE`, `LOST_FOUND_CARD_TYPE` y `LOST_FOUND_CHANNEL`.
+
+`LostFoundCatalogOption` contiene conceptualmente `id`, `catalogId`, `parentId` nullable, `optionType`, `code`, `label`, `value` nullable, `sortOrder`, `active`, `enterpriseId` y campos estándar PEC. Cada opción puede tener cero/uno parent y varios children. `parentId` debe apuntar a una opción del mismo catálogo; no se permiten ciclos jerárquicos. Las opciones utilizadas históricamente no se eliminan físicamente y se desactivan mediante `active`. No usar `scope_type` / `scope_ref_id` en esta versión.
+
+**Clasificación:** `LOST_FOUND_CLASSIFICATION` admite como máximo CATEGORY (parent null) → THEME (parent CATEGORY) → SUBTHEME (parent THEME). Una rama puede terminar en cualquiera de los tres niveles. `FoundItem` guarda solo `classificationOptionId` del nodo seleccionable más específico de la rama; categoría/tema/subtema se derivan recorriendo `parentId` cuando existan. La opción debe estar activa, pertenecer al enterprise correspondiente y al catálogo correcto, y cumplir la jerarquía configurada. No se exigen niveles inexistentes ni se selecciona un padre si un hijo configurado es obligatorio.
+
+**Otros catálogos administrables:** `LOST_FOUND_DOCUMENT_TYPE` (por ejemplo Cédula, Licencia, Pasaporte, Carné), `LOST_FOUND_CARD_TYPE` (Crédito, Débito, Regalo, Afiliación) y `LOST_FOUND_CHANNEL` (Presencial, Teléfono, Chat, Correo electrónico, Redes sociales, App móvil). Son datos configurables.
+
+**Fuera del catálogo maestro:** `LostFoundZone` / `LostFoundEstablishmentZone`; `public."documentType"` para identificación personal; estados controlados del dominio; `ValidationQuestion`; `CustodyPolicy`; responsables `sspectuser`; destinos físicos `sspectestablishment`; y `finderType` como valor controlado (`COLLABORATOR`, `CUSTOMER`, `OTHER`). Mantener temas/subtemas de búsqueda y reportes como niveles derivados de la opción de clasificación, no como columnas separadas de `FoundItem`.
 
 ---
 
@@ -300,6 +310,7 @@ Canales controlados: Presencial, Teléfono, Chat, Correo electrónico, Redes soc
 ```text
 sspectenterprise
   ├── LostItemReport ──1:N── ItemMatch ──N:1── FoundItem
+  ├── LostFoundCatalog ──1:N── LostFoundCatalogOption ──parentId── LostFoundCatalogOption
   └── FoundItem ──1:N── RecoveryClaim
                          ├──1:N── OwnershipValidation ──1:N── OwnershipValidationAnswer
                          ├──1:N── ContactAttempt
@@ -307,6 +318,9 @@ sspectenterprise
 
 FoundItem ──1:N── CustodyMovement
 FoundItem ──1:N── ItemTransfer
+FoundItem ──N:1── CustodyPolicy (custodyPolicyId)
+FoundItem ──N:1── LostFoundZone (zoneId obligatorio)
+FoundItem ──1:N── FoundItemFile ──N:1── sspectlffile
 FoundItem ──0..1── ItemDisposal
 FoundItem ──0..1── DocumentDetail
 FoundItem ──0..1── CardDetail
@@ -317,6 +331,10 @@ ValidationQuestion ──1:N── OwnershipValidationAnswer
 sspectestablishment ── custodio/destinos/locales de proceso
 sspectuser ── actores responsables de operaciones y auditoría
 LostFoundZone ── LostFoundEstablishmentZone ── sspectestablishment
+LostItemReport/ContactAttempt ── N:1 ── LOST_FOUND_CHANNEL option
+FoundItem ── N:1 ── classificationOptionId (LOST_FOUND_CLASSIFICATION)
+DocumentDetail ── N:1 ── LOST_FOUND_DOCUMENT_TYPE option
+CardDetail ── N:1 ── LOST_FOUND_CARD_TYPE option
 FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias ── sspectlffile
 ```
 
@@ -326,6 +344,8 @@ FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias 
 
 | Origen | Relación | Destino |
 |---|---|---|
+| LostFoundCatalog | 1:N | LostFoundCatalogOption |
+| LostFoundCatalogOption | 0..1 parent / 1:N children | LostFoundCatalogOption (mismo catálogo, sin ciclos) |
 | LostItemReport | 1:N | ItemMatch |
 | FoundItem | 1:N | ItemMatch |
 | FoundItem | 1:N | RecoveryClaim |
@@ -334,6 +354,9 @@ FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias 
 | RecoveryClaim | 0..1 | ItemDelivery |
 | FoundItem | 1:N | CustodyMovement |
 | FoundItem | 1:N | ItemTransfer |
+| FoundItem | N:1 | CustodyPolicy (registro inmutable mediante custodyPolicyId) |
+| FoundItem | N:1 | LostFoundZone activa (zoneId obligatorio y habilitada para currentEstablishmentId) |
+| FoundItem | 1:N | FoundItemFile |
 | FoundItem | 0..1 | ItemDisposal |
 | FoundItem | 0..1 | DocumentDetail |
 | FoundItem | 0..1 | CardDetail |
@@ -341,6 +364,11 @@ FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias 
 | ValidationQuestion | 1:N | FoundItemValidationReference |
 | OwnershipValidation | 1:N | OwnershipValidationAnswer |
 | ValidationQuestion | 1:N | OwnershipValidationAnswer |
+| LostFoundCatalogOption (LOST_FOUND_CLASSIFICATION) | 1:N | FoundItem (referencia mediante classificationOptionId) |
+| LostFoundCatalogOption (LOST_FOUND_CLASSIFICATION) | 1:N | LostItemReport (opción de clasificación cuando corresponda) |
+| LostFoundCatalogOption (LOST_FOUND_CHANNEL) | 1:N | LostItemReport / ContactAttempt |
+| LostFoundCatalogOption (LOST_FOUND_DOCUMENT_TYPE) | 1:N | DocumentDetail |
+| LostFoundCatalogOption (LOST_FOUND_CARD_TYPE) | 1:N | CardDetail |
 
 `ItemMatch` en ambos sentidos implementa la relación N:M entre LostItemReport y FoundItem. Las entidades raíz/transaccionales listadas en §5 guardan `enterprise_id`; hijos lo derivan cuando corresponda.
 
@@ -351,18 +379,20 @@ FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias 
 | Dato conceptual | Tratamiento aprobado |
 |---|---|
 | id / PK física | Interna; no es identificador visible funcional |
-| itemCode | Generado, separado de PK; formato inicial `LF-F-AAAA-XXXXXX`, independiente por empresa/año |
+| itemCode | Identificador funcional visible, generado en backend, independiente de PK, no editable ni reutilizable; formato lógico inicial `LF-F-AAAA-XXXXXX`, único por enterprise/año y seguro ante concurrencia. Mecanismo físico de correlativo/sequence en Plan técnico |
 | enterprise_id | FK lógica a empresa PEC; consistente con establecimiento |
 | currentEstablishmentId | Custodio físico actual, distinto de ubicación histórica |
-| tema/subtema | Catálogos PEC con valores propios Lost & Found |
-| zona | FK lógica a LostFoundZone habilitada para el establecimiento |
+| classificationOptionId | Nodo final válido de `LOST_FOUND_CLASSIFICATION`; categoría/tema/subtema presentes se derivan de su jerarquía `parentId` |
+| zoneId | Obligatorio; FK lógica a LostFoundZone activa y habilitada para currentEstablishmentId mediante LostFoundEstablishmentZone |
 | finderType | COLLABORATOR, CUSTOMER u OTHER |
-| finderEmployeeCode | Código colaborador cuando aplique |
-| finderName / finderLastName / finderPosition | Snapshot histórico de nombre, apellido y cargo |
+| finderEmployeeCode | Obligatorio para COLLABORATOR; proviene de la capacidad PEC existente |
+| finderName / finderLastName / finderPosition | Snapshot histórico: nombre, apellido y cargo obligatorios para COLLABORATOR; nombre y apellido obligatorios para CUSTOMER y opcionales para OTHER; cargo aplica a COLLABORATOR |
+| finderNote | Opcional para observaciones del finder |
 | registeredByUserId | Usuario PEC que registró |
-| estado | Dimensiones de dominio separadas y controladas |
-| expirationDate / policyVersion | Valor calculado y versión CustodyPolicy aplicada |
-| foundDate / createdAt / updatedAt | Fechas de negocio y sistema, según corresponda |
+| estado | Dimensiones de dominio separadas y controladas; estado inicial REGISTERED |
+| custodyPolicyId / expirationDate | Referencia al registro inmutable de CustodyPolicy aplicado y fecha de vencimiento calculada cuando corresponda; cambios posteriores no modifican históricos |
+| foundAt / foundTimeKnown | Fecha de hallazgo obligatoria y hora opcional; foundTimeKnown indica si la hora fue informada realmente, sin presentarla como conocida cuando fue inferida |
+| createdAt / updatedAt | Fechas de sistema |
 
 ---
 
@@ -370,13 +400,13 @@ FoundItem/LostItemReport/Delivery/Transfer/Disposal ── asociaciones propias 
 
 `LostItemReport` conserva snapshot del reportante: tipo/número de identificación, nombres, apellidos, celular/teléfono, email y demás datos registrados para el proceso. No se crea tabla genérica de snapshots.
 
-Finder permanece embebido conceptualmente en `FoundItem`, sin entidad Finder. Para colaborador se registra código, nombres, apellidos y cargo; nombre, apellido y cargo se conservan como snapshot del momento del hallazgo.
+Finder permanece embebido conceptualmente en `FoundItem`, sin entidad Finder. `finderType` toma `COLLABORATOR`, `CUSTOMER` u `OTHER`. Para `COLLABORATOR`, código, nombre, apellido y cargo son obligatorios; se obtienen mediante la capacidad PEC existente y se conservan como snapshot histórico. Para `CUSTOMER`, nombre y apellido son obligatorios. Para `OTHER`, nombre y apellido son opcionales. `finderNote` es opcional. Sprint 1 no incorpora identificación, teléfono ni email del finder.
 
 ---
 
 # 13. Zonas
 
-`LostFoundZone` + `LostFoundEstablishmentZone` representan ubicaciones internas de cada local. Ejemplos: servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas y entrada principal. El establecimiento solo habilita/usa sus zonas vinculadas. `FoundItem` guarda referencia a la zona interna elegida.
+`LostFoundZone` + `LostFoundEstablishmentZone` representan ubicaciones internas de cada local. Ejemplos: servicio al cliente, cajas, pasillos, estacionamiento, zona de comidas y entrada principal. Al registrar, `FoundItem.zoneId` es obligatorio y solo puede referenciar una zona activa y vinculada mediante una relación activa con `currentEstablishmentId`. Si el establecimiento no tiene zonas Lost & Found activas configuradas, el registro se bloquea en la capa funcional.
 
 No utilizar `Region → id_zona`, snapshots de zona territorial ni `id_zona` geográfico para este dominio.
 
@@ -401,6 +431,9 @@ Complementa las entidades de proceso `CustodyMovement`, `ItemTransfer`, `ItemDel
 # 16. Reglas de integridad
 
 - `FoundItem.currentEstablishmentId` representa el custodio actual mientras el artículo esté bajo custodia PEC; todo cambio se coordina con `CustodyMovement`.
+- Al registrar `FoundItem`, `zoneId` no puede ser nulo y referencia una LostFoundZone activa, habilitada para el establecimiento custodio mediante LostFoundEstablishmentZone.
+- `FoundItem.custodyPolicyId` referencia el registro inmutable de CustodyPolicy aplicado; no se registra FoundItem sin política activa aplicable ni se recalcula automáticamente su `expirationDate` histórica.
+- `FoundItem.itemCode` se genera en backend, es único por enterprise/año, no editable, no reutilizable y seguro ante concurrencia; el mecanismo físico se define en el Plan técnico.
 - `CustodyMovement`, `ItemTransfer`, `RecoveryClaim`, detalles y procesos deben referir al padre de dominio correspondiente.
 - No completar `ItemDelivery` sin validación requerida y acta firmada.
 - No completar `ItemDisposal` después de entrega; entrega y disposición completadas son cierres finales excluyentes.
@@ -418,16 +451,18 @@ El modelo lógico completo se define desde el inicio, pero las entidades se impl
 
 ## Sprint 1 — Registro de artículo encontrado
 
-Entidades/capacidades candidatas:
+Alcance lógico aprobado para el registro, con implementación física pendiente del Plan técnico:
 
-- `FoundItem`;
-- relación con empresa;
-- relación con establecimiento;
-- relación con usuario;
-- asociación con archivos;
-- catálogos mínimos;
-- estado inicial;
-- auditoría mínima de creación.
+- `FoundItem`, estado inicial `REGISTERED` y generación de `itemCode`;
+- `LostFoundCatalog` y `LostFoundCatalogOption` para la clasificación;
+- `LostFoundZone` y `LostFoundEstablishmentZone`;
+- `sspectlffile` y `FoundItemFile`, con reglas de carga PEC;
+- `CustodyPolicy`, aplicación de la versión inmutable y `expirationDate` cuando corresponda;
+- `LostFoundAudit` para la auditoría mínima de creación;
+- referencias a `sspectenterprise`, `sspectestablishment` y `sspectuser`;
+- seguridad backend y validaciones del registro.
+
+Este alcance lógico no autoriza crear todavía modelos Prisma, tablas ni migraciones.
 
 ## Sprint 2 — Registro de artículo perdido
 
@@ -490,7 +525,7 @@ Pendientes reales únicamente:
 5. Detalles de decisión que correspondan a Specs funcionales posteriores.
 # 19. Criterios de aprobación
 
-La aprobación `v1.0 APPROVED` de `PEC-LF-DATA-001` queda registrada con el cumplimiento de estos criterios:
+La aprobación `v1.2.0 APPROVED` de `PEC-LF-DATA-001` queda registrada con el cumplimiento de estos criterios:
 
 - [x] `PEC-LF-ARCH-001` esté aprobado.
 - [x] Las entidades principales estén acordadas.
@@ -513,17 +548,17 @@ La aprobación `v1.0 APPROVED` de `PEC-LF-DATA-001` queda registrada con el cump
 
 **Estado:** `APPROVED`
 
-**Versión:** `1.0.0`
+**Versión:** `1.2.0`
 
 **Aprobador:**
 
 - Walter Molina
 
-**Fecha:** `2026-09-30`
+**Fecha:** `2026-10-05`
 
 **Observación:**
 
-Documento creado para revisión técnica del modelo lógico completo del módulo Lost & Found antes de iniciar implementación física.
+Modelo lógico aprobado y alineado con `PEC-LF-FOUND-001` v1.0.0 antes de iniciar implementación física.
 
 La aprobación de este documento no implica crear todas las tablas inmediatamente. La implementación será incremental conforme al backlog y a las Specs funcionales aprobadas.
 
@@ -536,6 +571,8 @@ La aprobación de este documento no implica crear todas las tablas inmediatament
 | 0.1.0 | 2026-09-30 | Mbrion / equipo PEC | Primer borrador del modelo lógico completo de Lost & Found. |
 | 0.2.0 | 2026-09-30 | Mbrion / equipo PEC | Consolidación de decisiones arquitectónicas y de modelo aprobadas durante revisión funcional/técnica. El resumen §22 remite a las decisiones documentadas en las secciones del modelo. |
 | 1.0.0 | 2026-09-30 | Walter Molina | Aprobación del modelo lógico Lost & Found por Walter Molina. |
+| 1.1.0 | 2026-10-03 | Walter Molina | Se incorpora LostFoundCatalog/LostFoundCatalogOption y se sustituye topicId/subtopicId de FoundItem por classificationOptionId. |
+| 1.2.0 | 2026-10-05 | Walter Molina | Se alinea el modelo lógico con PEC-LF-FOUND-001 v1.0.0: custodyPolicyId, foundAt/foundTimeKnown, finderNote, zoneId obligatorio, prioridad de CustodyPolicy, itemCode y alcance técnico lógico de Sprint 1. |
 
 ---
 
@@ -543,6 +580,6 @@ La aprobación de este documento no implica crear todas las tablas inmediatament
 
 Este resumen orienta la consulta del modelo lógico desarrollado en §§5–16. `LostItemReport` y `FoundItem` son conceptos independientes; las relaciones, entidades y cardinalidades se describen en §§6 y 10. Las referencias y reutilización PEC, archivos, zonas, catálogo, roles y configuración se describen en §§5, 7–8 y 13. Estados, auditoría, integridad y snapshots se describen en §§14–16.
 
-Las políticas funcionales confirmadas de custodia y reportes se describen en §6.13 y §17. Los nombres físicos siguen siendo referencias conceptuales y no autorizan implementar tablas, Prisma ni migraciones. El documento está en estado **APPROVED**.
+Lost & Found usa `LostFoundCatalog` / `LostFoundCatalogOption` independientes del catálogo funcional PEC actual; la clasificación flexible categoría/tema/subtema se deriva por `parentId`, y `FoundItem` guarda solo `classificationOptionId`. El artículo conserva `foundAt`, `foundTimeKnown`, `zoneId` obligatorio y `custodyPolicyId` del registro inmutable aplicado; `itemCode` es único por enterprise/año. Finder permanece embebido con `finderNote` opcional. Las reglas de CustodyPolicy y el alcance lógico de Sprint 1 se describen en §6.13 y §17. Los nombres físicos siguen siendo referencias conceptuales y no autorizan implementar tablas, Prisma ni migraciones. El documento está en estado **APPROVED**.
 
 Pendientes reales detallados en §18: mecanismo técnico de firma; algoritmo/pesos/umbrales de matching; proveedor/detalles de transcripción; contrato técnico del servicio externo de datos del cliente; y detalle implementable de Specs funcionales posteriores.
