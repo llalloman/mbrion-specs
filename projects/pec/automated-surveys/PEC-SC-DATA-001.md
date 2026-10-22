@@ -4,8 +4,8 @@
 |---|---|
 | ID | PEC-SC-DATA-001 |
 | Estado | DRAFT |
-| Versión | 0.2 |
-| Fecha | 2026-10-18 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Español; entidades, campos, enums y nombres técnicos en inglés |
 | Documentos base | `PEC-SC-ARCH-001.md`, `PEC-SC-FOUND-001.md` |
 
@@ -16,6 +16,8 @@
 Definir los datos que permiten configurar campañas, conservar selecciones multiselect, ejecutar calendarios, registrar resultados por compra/destinatario y atribuir respuestas con seguridad.
 
 Principios:
+
+- Las etiquetas españolas son de presentación; no se almacenan en lugar de enums, campos o IDs técnicos. La normalización de idioma no modifica modelos, enums, columnas ni contratos Prisma/PostgreSQL.
 
 - Reutilizar `sspectsurvey` y `sspectresult`; no duplicar encuestas ni respuestas.
 - Mantener configuración editable de `Campaign` separada del historial inmutable de `CampaignExecution`.
@@ -53,7 +55,7 @@ Los nombres anteriores son los verificados en el checkout actual. No se infiere 
 ```text
 sspectuser (sspecrpkuse) 1 ───── N Campaign (createdByUserId)
 sspectsurvey (sspecrpksur) 1 ── N Campaign (surveyId)
-sspectenterprise (sspecrpkent) 1 ─ N Campaign (enterpriseId; sujeto a validación de scope)
+sspectenterprise (sspecrpkent) — no tiene relación Campaign establecida por la decisión multiempresa aprobada
 
 Campaign 1 ── N CampaignDivision
 Campaign 1 ── N CampaignDepartment
@@ -85,7 +87,6 @@ Las relaciones externas con catálogos CF/Analytics se representan con identific
 | Campo conceptual | Tipo conceptual | Null | Uso / sensibilidad |
 |---|---|---:|---|
 | `id` | Entero autoincremental | No | PK; convención predominante PEC. |
-| `enterpriseId` | Entero FK a `sspectenterprise` | Pendiente | Scope organizacional si Campaign pertenece al mismo tenant/enterprise que Survey. |
 | `surveyId` | Entero FK a `sspectsurvey.sspecrpksur` | No | Survey PEC existente; no almacenar una segunda definición de Survey. |
 | `createdByUserId` | Entero FK a `sspectuser.sspecrpkuse` | No propuesto | Relación navegable con el usuario que crea Campaign. |
 | `name` | String | No | Nombre funcional de campaña. |
@@ -98,7 +99,7 @@ Las relaciones externas con catálogos CF/Analytics se representan con identific
 | `startDate` | Fecha | Sí | Obligatorio solo para `FREQUENCY`. |
 | `endDate` | Fecha | Sí | Obligatorio solo para `FREQUENCY`. |
 | `sendTime` | Hora local | Sí | Obligatorio para ambos tipos. Tipo físico `TIME`/equivalente y zona quedan OPEN. |
-| `timeZone` | String | Sí | Zona IANA a confirmar antes de scheduling. |
+| `timeZone` | String | Sí | Nullable mientras DRAFT no se programa; debe persistirse explícitamente antes de Schedule/Resume efectivos. Para Campaigns de Ecuador, default aprobado `America/Guayaquil`; no se infiere del navegador. Otras zonas, DST y conversión a instantes siguen sujetos a OPEN. |
 | `nextExecutionAt` | Timestamp | Sí | Próximo instante absoluto calculado; nulo si no está programada o ya no tiene siguiente ciclo. |
 | `lastExecutionAt` | Timestamp | Sí | Instante de última ejecución concluida o procesada, semántica exacta OPEN. |
 | `emailTemplateExternalId` | String | Sí | Identificador externo de plantilla Emblue, cuando el contrato lo confirme. |
@@ -111,9 +112,11 @@ Las relaciones externas con catálogos CF/Analytics se representan con identific
 | `version` | Entero | No | Control/auditoría optimista si PEC lo aplica al nuevo módulo. |
 | `created_from_ip` / `updated_from_ip` | String | Pendiente | Incluir solo si la política de auditoría PEC los requiere; no guardar IP si no aplica. |
 
-**Relaciones:** Survey requerida; `sspectuser` como creador; opcional/recomendado `sspectenterprise` sujeto a confirmar scoping. Tiene colecciones de selecciones, ejecuciones y recipients.
+**Relaciones:** Survey requerida; `sspectuser` como creador; sin FK Campaign a `sspectenterprise` bajo la decisión multiempresa. Tiene colecciones de selecciones, ejecuciones y recipients.
 
 **Índices/constraints recomendados:** PK `id`; índice por `(status, nextExecutionAt)` para dashboard/scheduler; `(surveyId, status)`; `(createdByUserId, created_date)` si se usa filtro de creador. `postPurchaseOffset >= 0`. Validación mutuamente excluyente: `ONE_TIME` requiere `sendDate`, no requiere `startDate/endDate/frequency`; `FREQUENCY` requiere `startDate/endDate/frequency`, no requiere `sendDate`; ambos requieren `sendTime`. Constraint de nombre único no está aprobado.
+
+La duración de `FREQUENCY` para validar su frecuencia permitida se deriva inclusivamente de las fechas `startDate` y `endDate` como valores de calendario (`endDate - startDate + 1` días calendario), sin alterar campos persistidos ni introducir timestamps. `EndDate` también es inclusiva como fecha local de negocio: una ocurrencia en esa fecha a `SendTime` es válida y no se generan ocurrencias posteriores. Para `MONTHLY` y `QUARTERLY`, cada fecha local se calcula desde `StartDate` y el índice; conserva el día original, o usa el último día disponible del mes destino, sin desplazar el ancla posterior. Esto incluye años bisiestos y ocurre antes de convertir a UTC. `DRAFT` puede conservar configuración incompleta o pendiente de corrección; la validación completa corresponde a la acción efectiva de programación.
 
 **Uniqueness:** ninguna unicidad natural aprobada. `id` es PK. No asumir unicidad global por nombre, Survey o propietario.
 
@@ -179,6 +182,10 @@ Campos conceptuales aplicables a cada una:
 **Propósito:** selecciones opcionales de `Store`. **Campos:** `campaignId`, `externalSystem`, `storeExternalId`, `labelSnapshot` nullable, `parentExternalId` nullable. **Relación:** N:1 Campaign. **Índices/constraints:** unicidad Campaign + sistema + store ID. No relacionar automáticamente con `sspectestablishment`: equivalencia entre Store externo y establecimiento PEC OPEN. **Lifecycle/histórico:** editable/snapshot. **Datos sensibles:** corporativos.
 
 **Regla común de filtros:** selección dentro de un filtro se evalúa con OR; grupos distintos, con AND. `Auxiliary Subclassification` no tiene entidad ni campo en v1. Un cambio de padre que invalide hijos se refleja removiendo las selecciones incompatibles de las filas corrientes; las ejecuciones históricas retienen su snapshot.
+
+#### Referencias sintéticas MOCK
+
+Las filas de selección continúan guardando arrays de IDs externos y sus snapshots existentes; la decisión MOCK no requiere cambio de modelo ni migración. Cuando el proveedor sea MOCK, IDs `MOCK-*` y etiquetas `[MOCK]` son valores sintéticos aislados. `parentExternalId` solo conserva la relación de demostración servida por el mismo proveedor, no una jerarquía real confirmada. Al sustituir el proveedor, backend debe validar el namespace y pertenencia con Analytics; no reinterpretar automáticamente IDs MOCK.
 
 ### 4.3 `CampaignExecution`
 
@@ -423,7 +430,7 @@ Reglas del snapshot:
 
 | Modelo | Índices / constraints conceptuales |
 |---|---|
-| `Campaign` | `(status, nextExecutionAt)`; `(surveyId, status)`; offset >= 0; invariantes condicionales de campos por `sendType`; índice de `enterpriseId` si se confirma scope. |
+| `Campaign` | `(status, nextExecutionAt)`; `(surveyId, status)`; offset >= 0; invariantes condicionales de campos por `sendType`. No agregar `enterpriseId` a Campaign: el alcance multiempresa aprobado deriva de CASL, no de la empresa activa PEC. |
 | Cada `Campaign*` selector | PK/unique `(campaignId, externalSystem, externalId)`; opcional índice externo inverso si se consulta. |
 | `CampaignExecution` | unique `(campaignId, executionKey)`; `(status, scheduledAt)`; `(campaignId, scheduledAt)`; `(status, claimExpiresAt)`; conteos >= 0. |
 | `CampaignRecipient` | unique `(campaignId, purchaseSource, purchaseExternalId)`; `(campaignId, status)`; `(firstExecutionId)`; índice de reservas vencidas; conteo por cliente indexado solo con caso probado. |
@@ -440,7 +447,7 @@ Estas recomendaciones se deben validar con consultas reales y explain plans; no 
 | `sspectsurvey` | `Campaign.surveyId` referencia `sspecrpksur`. | Añadir relación inversa Prisma. No duplicar contenido. Validar publicación/vigencia en el servicio. |
 | `sspectresult` | `ResponseCorrelation.surveyResultId` referencia `sspecrpkres`. | Añadir relación inversa opcional o dejar relación navegable desde el nuevo modelo; no alterar `content Json` para guardar tokens. |
 | `sspectuser` | `Campaign.createdByUserId` referencia `sspecrpkuse`. | Añadir relación inversa Campaign; definir `onDelete` sin cascada de historial. |
-| `sspectenterprise` | Posible `Campaign.enterpriseId` y validación Survey/usuario dentro del mismo scope. | OPEN: confirmar tenancy y que Campaign deba vivir en Enterprise PEC. |
+| `sspectenterprise` | Campaign no tiene FK al enterprise PEC; puede asociarse a Surveys de distintas empresas conforme a política multiempresa. | No filtrar por empresa activa ni tratar Company de CF como Enterprise PEC. |
 | `sspectformat`, `sspectestablishment` | No se relacionan en v1 hasta comprobar equivalencia con `Format`/`Store` externos. | Si se confirma identidad/autoridad, reevaluar FKs para evitar IDs duplicados. |
 
 ## 13. OPENs
@@ -449,9 +456,9 @@ Estas recomendaciones se deben validar con consultas reales y explain plans; no 
 |---|---|---|
 | OPEN-01 | Contrato CF/Analytics, source codes, IDs/tipos/longitudes, jerarquías y fecha de actualización. | Determina claves de selecciones y deduplicación. |
 | OPEN-02 | Equivalencia o no de Company/Format/Store con `sspectenterprise`/`sspectformat`/`sspectestablishment`. | Evita relaciones FK incorrectas o duplicación de maestros. |
-| OPEN-03 | Scope de Campaign por `enterpriseId` y autorización del usuario creador. | Survey actual está ligada a enterprise, pero no se definió scope de campaña. |
+| OPEN-03 | El alcance multiempresa ya está aprobado; validar que la implementación no filtre por enterprise activo. | No amplía permisos generales de Surveys ni de otros módulos. |
 | OPEN-04 | Campo/regla real que indica Survey `PUBLISHED`, archivado y disponibilidad. | Schema actual muestra `status`, `archived`, `content Json`; semántica publicada no está determinada por el schema aislado. |
-| OPEN-05 | Semántica/tipo de fecha y hora; timezone, DST, fin de mes y regla de fin de `EndDate`. | Evita ambigüedad en calendarización. |
+| OPEN-05 | DST/horas ambiguas o inexistentes, timezone de campañas fuera de Ecuador, conversión local/UTC y efecto de recovery/downtime sobre EndDate. El default Ecuador `America/Guayaquil`, la persistencia explícita de timezone, el límite local inclusivo y el ajuste mensual/trimestral anclado están aprobados. | Evita ambigüedad restante en calendarización; no cambia los campos físicos actuales. |
 | OPEN-06 | Semántica de `lastExecutionAt` y cuándo actualizar el próximo ciclo frente a éxito/fallo. | Impacta dashboard, recovery e idempotencia. |
 | OPEN-07 | `executionKey` exacta, granularidad de recovery, claim/lease y política de múltiples réplicas. | Evita doble ejecución y no perder slots. |
 | OPEN-08 | `purchaseId` vs `transactionId`, fuente, estabilidad, posibilidad de colisión entre sistemas y tratamiento de IDs nulos. | Define la constraint de deduplicación durable. |
@@ -487,13 +494,18 @@ Esta sección es conceptual, no un schema ejecutable.
 ## 15. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.2
+- **Version:** 0.4
 - **Fuentes revisadas:** arquitectura, especificación funcional y `pec-api/prisma/schema.prisma`.
 - **Pendiente:** resolver OPENs de CF/Analytics, Emblue, estados Survey, calendario, PII, auditoría y operación antes de definir schema final.
-- **Artefactos deliberadamente no generados:** schema definitivo, migración, código ni tasks.
+- **Alcance documental:** este documento sigue definiendo el modelo logico; los modelos Prisma Campaign existen en checkout. No se ejecutan migraciones ni se modifica la base desde esta revision.
 
 ## 16. Historial de cambios
 
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Se hace obligatoria la trazabilidad persistente por Execution y Recipient; se relaciona la atribución con la invitación/Attempt; se distinguen duplicados, reservas temporales, procesamiento y envío; se explicita la relación de recuperación con ejecuciones originales y la consolidación de frecuencias omitidas. |
+| 0.3 | 2026-10-20 | Se elimina el scope conceptual Campaign por enterpriseId; se distingue Enterprise PEC de Company externa y se mantiene el almacenamiento de IDs de catálogos como referencias externas, incluidos los IDs sintéticos MOCK. El documento permanece DRAFT. |
+| 0.4 | 2026-10-20 | Se aclara que las etiquetas españolas son de presentación y no sustituyen enums, propiedades, entidades, IDs ni valores persistidos. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se documenta la duración inclusiva derivada de fechas calendario para validar frecuencias y la separación entre borrador editable y validación efectiva de programación. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se documenta `America/Guayaquil` como default de Campaign para Ecuador, la persistencia explícita de `timeZone`, EndDate local inclusiva y la prohibición de inferir zona del navegador; recovery y conversión horaria permanecen OPEN. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Documenta recurrencias MONTHLY/QUARTERLY ancladas a StartDate, ajuste al último día sin drift y aritmética local previa a UTC, incluidos años bisiestos. Estado DRAFT conservado. |

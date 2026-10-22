@@ -7,7 +7,8 @@
 | Documento | PEC-SC-INTEG-001 |
 | Título | Especificación de Integraciones - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.2 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos en inglés |
 
 > Este documento describe las fronteras funcionales de integración aprobadas para Automated Survey Campaigns. Los contratos de CF/Analytics y Emblue no han sido entregados; los detalles que dependen de ellos se identifican como **OPEN**. No define endpoints externos concretos ni sustituye ARCH-001, FOUND-001, DATA-001 o API-001.
@@ -28,6 +29,18 @@ Se describen contratos conceptuales. No se fijan rutas, esquemas JSON de proveed
 - **Verificado en código:** `requestDiagnostics` genera `X-Request-ID` y contexto de diagnóstico; el logger incluye sanitización de valores sensibles. Las integraciones nuevas deben evitar payloads completos en logs aun con sanitización.
 - **Verificado en código:** no se encontró un adaptador Emblue ni un adaptador de audiencia CF/Analytics para esta funcionalidad.
 - **OPEN:** los patrones existentes no demuestran el contrato, autenticación, capacidades ni políticas de los proveedores de esta funcionalidad.
+
+## 2.1 Catálogos Campaign: MOCK temporal
+
+**APPROVED/MOCK:** los contratos reales CF/Analytics no están disponibles. Campaign usa una abstracción propia de proveedor, independiente de servicios generales PEC. El contrato entrega seis catálogos: Division, Department, Company, Auxiliary Classification, Format y Store; no incluye Auxiliary Subclassification en V1.
+
+El proveedor Mock usa IDs/nombres sintéticos identificados como `[MOCK]`/`MOCK-*`. Las relaciones padre-hijo son fixtures de demostración para probar multiselección y limpieza de incompatibles; no describen jerarquías confirmadas de CF. Cada opción tiene `id`, `label`, `parentId` cuando aplique, `active` y `source`. El contrato Angular no cambia al sustituir el proveedor.
+
+MOCK se activa explícitamente con `CAMPAIGN_CATALOG_PROVIDER=mock`, el backend lo rechaza en `NODE_ENV=production` y no cae automáticamente a MOCK ante error de Analytics. El proveedor Analytics es un seam no configurado: no se inventan endpoints, autenticación ni payloads.
+
+Las etiquetas sintéticas MOCK que se muestran en Angular están en español y conservan el prefijo visible de demostración, por ejemplo `[MOCK] División Norte` y `[MOCK] Local Quito Centro`. Se conservan los IDs actuales y la forma de respuesta API; no se localizan ni alteran campos técnicos.
+
+Division, Department y Company son obligatorios solo al programar; se permiten incompletos en DRAFT. Auxiliary Classification, Format y Store son opcionales. Backend valida IDs y relaciones usando el proveedor configurado. Estos catálogos no determinan audiencia, recipients ni envíos; scheduler, Audience Preview real y correos quedan **DEFERRED** mientras no existan contratos reales. Enterprise PEC y Company externa no se equiparan.
 
 ## 3. Ownership matrix
 
@@ -354,3 +367,5 @@ Antes de habilitar envíos productivos deben estar documentados y revisados los 
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Se explicita la recuperación de compras pendientes tras fallos de lectura sin watermark/lookback ni ráfagas; se distinguen reserva, procesamiento y outcomes; se separan aceptación técnica, resultado operativo y eventos de entrega; se dividen los flujos de webhook y atribución de Survey. |
+| 0.3 | 2026-10-20 | Se añade proveedor MOCK exclusivo de Campaign, contrato estable reemplazable, datos sintéticos y reglas de seguridad; se separan sus catálogos de la audiencia real CF/Analytics y se difieren scheduler/envíos con MOCK. El documento permanece DRAFT. |
+| 0.4 | 2026-10-20 | Se requiere presentar etiquetas de catálogos MOCK en español, conservando IDs, source y contrato API. Estado DRAFT conservado. |

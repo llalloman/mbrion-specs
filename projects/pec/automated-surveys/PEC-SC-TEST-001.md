@@ -7,7 +7,8 @@
 | Documento | PEC-SC-TEST-001 |
 | Título | Estrategia de Pruebas - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.2 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos de tests en inglés |
 
 > Define los escenarios y evidencias de QA para Automated Survey Campaigns, alineados con ARCH-001, FOUND-001, DATA-001, API-001, INTEG-001 y SCHED-001. No crea pruebas ni convierte puntos **OPEN** de esos documentos en reglas aprobadas.
@@ -76,7 +77,7 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 
 - Recorrer `/surveys/automated-campaigns`: dashboard/lista → búsqueda/filtro → detalle → creación/preview → schedule o suspend/resume según estado → regreso/listado.
 - Verificar UI y API juntos usando backend/DB QA y proveedores simulados deterministas.
-- Usar los roles de prueba que finalmente se mapeen a PEC; hasta entonces, los E2E autenticados de Campaign quedan **OPEN**.
+- Usar fixtures autenticados para los roles efectivos `ADMIN`, `SUPERADMIN` y roles no autorizados; el runner E2E UI sigue OPEN.
 - No depender de mocks de estado de frontend para afirmar que Campaign se guardó o que una invitación se envió.
 
 ### Contract y sandbox
@@ -101,8 +102,8 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 | TST-CRUD-02 | Integration | Leer lista/detalle y paginar/filtar por estado con fixtures mixtos. | Filtra antes de paginar; orden estable y `total` consistente; scope aplicado. | P1 | Supertest response y consultas controladas. |
 | TST-CRUD-03 | Unit + Integration | Editar DRAFT y SUSPENDED; intentar editar ACTIVE, COMPLETED y CANCELLED. | DRAFT/SUSPENDED válidos actualizan config; ACTIVE solo se edita después de suspender; finales son solo lectura. | P0 | Tabla de transición ejercitada; HTTP 409/response; no-mutación DB. |
 | TST-CRUD-04 | Integration | Delete DRAFT sin historial y luego intentar delete con Execution/Recipient histórico. | Solo caso permitido conforme a decisión de soft-delete; historial nunca se borra físicamente. | P1 | Estado/row counts antes-después; regla soft delete resuelta. **OPEN** el mecanismo exacto. |
-| TST-AUTH-01 | Security + E2E | Usuario sin permiso administra Campaign, preview, acciones o recipients. | Backend niega la operación aunque UI oculte/deshabilite acciones. | P0 | Prueba 401/403, audit/log sin PII, matriz de roles aprobada. **OPEN** roles. |
-| TST-AUTH-02 | Security + Integration | Manipular `campaignId`, `executionId`, `surveyId` o IDs externos fuera del scope autorizado. | No hay lectura ni modificación cross-scope; respuesta evita filtrar existencia cuando aplique la política IDOR. | P0 | Requests negativos y evidencia de scope/guard. **OPEN** scope final. |
+| TST-AUTH-01 | Security + E2E | Rol distinto a ADMIN/SUPERADMIN efectivo intenta Campaign, selector Survey, catalogos, preview/acciones/recipients. | Backend niega aunque Angular permita request; ADMIN/SUPERADMIN conserva acceso aprobado. | P0 | HTTP autenticado, 401/403 y evidencia CASL; grants de otros modulos sin cambio. |
+| TST-AUTH-02 | Security + Integration | Manipular IDs de Campaign/Execution/Survey o IDs externos incompatibles. | Rechazo sin modificacion ni fuga; alcance multiempresa permitido solo para roles autorizados. | P0 | Requests negativos y evidencia de scope/guard. |
 | TST-UI-01 | Unit + Integration + E2E | Buscar por `searchText` (Campaign Name), por `surveySearchText` (Survey Name) y por ambos a la vez; aplicar también `status`, paginación y scope. | Cada búsqueda filtra su nombre; cuando ambas están presentes se combinan con AND; status se combina con las búsquedas y el scope, antes de paginar. Incluye `CANCELLED`. | P0 | Jest Angular; requests/responses API; fixtures DB por scope y páginas; E2E cuando haya runner. |
 | TST-UI-02 | Unit + Integration + E2E | Dashboard con Campaigns visibles y no eliminadas lógicamente de todos los estados, incluyendo `CANCELLED`. | Presenta exactamente seis cards: Total, Active, Scheduled, Draft, Suspended y Completed. Total incluye las CANCELLED visibles; CANCELLED aparece en `byStatus`/filtro, sin card propia. | P0 | Conteos API comparados con filas DB dentro del scope; prueba UI que verifica seis cards y ausencia de card CANCELLED. |
 | TST-UI-03 | Unit + E2E | Campaign Detail con estados/datos mixtos. | Detalle coincide con API y muestra Scheduling, Segmentation, conteos e historial disponible sin inventar aperturas/clicks. | P1 | Fixture DB/API, comparación UI/API y screenshot/artifact. |
@@ -127,14 +128,14 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 
 | ID | Categoría primaria / adicional | Escenario y precondiciones | Resultado esperado | Prioridad | Evidencia requerida |
 |---|---|---|---|---|---|
-| TST-CAL-01 | Unit + Integration | ONE_TIME con SendDate/SendTime futuros y vencidos; campos de FREQUENCY incompatibles. | Valida campos exclusivos; `nextExecutionAt` es única fecha/hora calculada; no crea ejecución antes del vencimiento. | P0 | Clock fijo, casos límites y persistencia. |
+| TST-CAL-01 | Unit + Integration | ONE_TIME con SendDate/SendTime futuros y vencidos; campos de FREQUENCY incompatibles; Campaign de Ecuador sin zona horaria explícita. | Valida campos exclusivos; `nextExecutionAt` es única fecha/hora calculada; no crea ejecución antes del vencimiento. Antes de programación efectiva persiste `America/Guayaquil` por defecto; no infiere la zona del navegador. | P0 | Clock fijo, casos límites, persistencia de `timeZone` y payload. |
 | TST-CAL-02 | Unit + Integration | FREQUENCY con Start, End, SendTime y cada Frequency. | Primera fecha corresponde al slot definido; siguiente fecha usa aritmética de calendario y no duración fija para MONTHLY/QUARTERLY. | P0 | Tabla de casos y fechas esperadas contra regla aprobada. |
-| TST-CAL-03 | Unit | Catálogo dinámico para rangos 1–6, 7–13, 14–29, 30–89 y >=90 días. | Solo ofrece y acepta las frecuencias permitidas por FOUND-001 en cada límite del rango. | P1 | Tests parametrizados en días frontera (incluye cambio 6/7, 13/14, 29/30, 89/90). |
-| TST-CAL-04 | Unit + Integration | MONTHLY iniciado día 29/30/31 y transición febrero/marzo; siguiente cálculo repetido. | Resultado sigue la política de month-end acordada, determinista y sin drift silencioso. | P0 | Tabla de calendario; aprobación de política OPEN antes de fijar exact expected. |
-| TST-CAL-05 | Unit + Integration | QUARTERLY en fin de trimestre/mes y año bisiesto; múltiples ciclos. | Avanza tres meses calendario, respeta anclaje y no suma 90 días fijos. | P1 | Calendario sintético; regla de anclaje OPEN antes de aprobación. |
-| TST-CAL-06 | Unit + Integration | Frecuencia permitida/no permitida por duración; frecuencia cae exactamente en EndDate y la siguiente la supera. | Rechaza combinación no permitida; permite slot final según regla de inclusión acordada y marca Campaign COMPLETED cuando no hay siguiente slot válido. | P0 | Matriz de ventanas, fecha límite y transición; inclusión temporal OPEN. |
+| TST-CAL-03 | Unit | Catálogo dinámico con duración inclusiva `calendarDayDifference(endDate, startDate) + 1`. | Solo ofrece y acepta las frecuencias permitidas por FOUND-001 en cada límite inclusivo. | P1 | Tests parametrizados para duraciones 1, 6, 7, 13, 14, 29, 30, 89 y 90; fechas reales e inválidas; cálculo sin timestamps ni UTC. |
+| TST-CAL-04 | Unit + Integration | MONTHLY iniciado el 31 de enero y el 30 de enero, incluyendo febrero y el mes siguiente. | Ajusta a último día disponible y restaura el día original anclado después del mes corto; no hay desplazamiento acumulativo. | P0 | Asserts de secuencia `31 ene → 28 feb → 31 mar → 30 abr` y `30 ene → 28 feb → 30 mar`, con hora local/UTC. |
+| TST-CAL-05 | Unit + Integration | QUARTERLY con mes destino corto y secuencia que cruza año bisiesto. | Avanza tres meses calendario desde StartDate y su índice; ajusta el día faltante sin cambiar el ancla ni sumar 90 días fijos. | P1 | Secuencias trimestrales, incluida `29 feb 2024 → 28 feb 2025`; comprobar hora local y UTC. |
+| TST-CAL-06 | Unit + Integration | Validación de frecuencia frente a duración inclusiva; slot de recurrencia en EndDate a SendTime y siguiente slot posterior. | Rechaza frecuencia incompatible en operación efectiva; `DRAFT` incompleto o pendiente de corrección puede guardarse. El slot exactamente en EndDate a SendTime es válido y no se genera otro posterior. La ejecución real sigue bloqueada mientras falten precondiciones. | P0 | Tests unitarios de calendario/local date y validación API/UI; persistencia de `timeZone`; el scheduler real requiere habilitación posterior. |
 | TST-CAL-07 | Unit + Integration | `nextExecutionAt` y `lastExecutionAt` entre éxito, partial error y fallo total. | Calendario avanza solo conforme regla aprobada; `lastExecutionAt` tiene semántica estable; fallo total no avanza cutoff exitoso. | P0 | Antes/después DB + eventos de transición; política final OPEN en DATA/SCHED. |
-| TST-CAL-08 | Unit + Integration | Zona horaria, DST y hora inexistente/repetida una vez definida. | Misma entrada genera resultado determinista y visible; nunca se interpreta silenciosamente como UTC si se configuró hora local. | P1 | Table tests por timezone; timezone/DST OPEN. |
+| TST-CAL-08 | Unit + Integration | Zona horaria explícita `America/Guayaquil`, conversión local→UTC, DST y hora inexistente/repetida. | Se conserva la zona de Campaign, no se infiere del navegador y la hora local de negocio se convierte al instante UTC correspondiente. | P1 | Pruebas de conversión local→UTC y persistencia de zona; defecto actual de conversión debe corregirse antes de habilitar programación. DST/reglas de otras zonas permanecen OPEN. |
 
 ## 8. Matriz — Scheduler, lifecycles e idempotencia
 
@@ -144,11 +145,11 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 | TST-SCH-02 | Integration | Crear una CampaignExecution por `campaignId + executionKey` al repetir tick sobre mismo slot ordinario. | `UNIQUE(campaignId, executionKey)` se cumple; la identidad del slot es determinista; segundo tick encuentra la misma Execution y no crea Execution ni dispatch adicional. | P0 | Constraint PostgreSQL, clave del slot, filas antes/después y conteo de invocaciones adapter. |
 | TST-SCH-03 | Integration + Concurrency | Dos o más workers/pods compiten por una Campaign/slot simultáneamente en PostgreSQL. | Exactamente un claim ganador; una Execution/dispatch lógico; perdedores no procesan. | P0 | Prueba concurrente con procesos/conexiones independientes y salida de cada claim. Mocks no bastan. |
 | TST-SCH-04 | Unit + Integration | Validar `PENDING → PROCESSING → COMPLETED`, `COMPLETED_WITH_ERRORS` o `FAILED`; intentar saltos/reapertura terminal. | Solo transición válida; estado final histórico no se sobrescribe. | P0 | Tabla de transiciones, HTTP/service rejection y DB history. |
-| TST-SCH-05 | Unit + Integration | Campaign DRAFT→SCHEDULED→ACTIVE, suspend/resume/cancel y terminación por EndDate. | Transiciones permitidas; Campaign suspendida/final no se reclama; ACTIVE se edita solo tras suspend. | P0 | Matriz FOUND, eventos de estado y consulta scheduler. |
+| TST-SCH-05 | Unit + Integration | Campaign DRAFT→SCHEDULED→ACTIVE, suspend/resume/cancel y terminación por EndDate. | Transiciones conforme a FOUND; Campaign suspendida/final no se reclama; ACTIVE se edita solo tras suspend. Schedule/Resume permanecen bloqueados hasta resolver publicación, audiencia real y demás precondiciones; EndDate es inclusiva en fecha local. | P0 | Matriz FOUND, validación de precondiciones y eventos/consulta scheduler una vez habilitados; no habilitar por esta prueba. |
 | TST-SCH-06 | Integration + Concurrency | Dos páginas/workers intentan reservar misma compra y mismo Campaign. | Unique recipient key permite un ganador; conflicto se registra como duplicate sin alterar recipient original. | P0 | Constraint DB, conteos y resultado por ID sintético. |
 | TST-SCH-07 | Unit + Integration | Una persona tiene compras distintas y luego reaparece la misma compra en otro ciclo. | Nueva purchase elegible puede generar recipient independiente; purchase repetida no se reenvía en misma Campaign. | P0 | Ledger tras ciclos y llamadas al fake Emblue. |
 | TST-SCH-08 | Failure/Recovery + Integration | Worker cae con lease activo/expirado antes del envío, entre lotes o tras respuesta del provider pero antes de persistir; incluye reserva expirada. | Lease vencido de Execution PROCESSING puede recuperarse en la misma Execution si es seguro. La reserva solo devuelve ownership; se inspeccionan ledger, Attempts y resultado del provider. No se repiten envíos confirmados; resultado ambiguo no autoriza resend sin reconciliación/idempotencia confirmada. | P0 | Fault points, snapshot/cursor/ledger/Attempt en DB, invocaciones adapter y logs sin PII; contrato Emblue para ambigüedad OPEN. |
-| TST-SCH-09 | Failure/Recovery + Concurrency | Downtime omite varios slots de FREQUENCY; recuperar cuando el API vuelve con páginas múltiples. | Una recuperación consolidada evalúa `PurchaseDate + PostPurchaseOffset <= evaluationDate`. `eligibilityCutoffAt` y `evaluationDate` quedan congelados en snapshot y no cambian entre páginas ni durante recovery. No crea una Execution por slot/tick atrasado ni duplica envíos; FAILED no se reabre. | P0 | Clock controlado, snapshot y keys, relación recovery, cantidad de executions/envíos y nextExecutionAt. Catch-up, timezone y conversiones OPEN. |
+| TST-SCH-09 | Failure/Recovery + Concurrency | Downtime omite varios slots de FREQUENCY; recuperación con páginas múltiples y slots que alcanzan o exceden EndDate. | Una recuperación consolidada evalúa `PurchaseDate + PostPurchaseOffset <= evaluationDate`; snapshot conserva `eligibilityCutoffAt` y `evaluationDate`. No crea slot posterior a EndDate ni duplica envíos; FAILED no se reabre. El tratamiento de slots omitidos, recuperación y finalización sigue OPEN. | P0 | Clock controlado, snapshot/keys, relación recovery y conteos. Política de catch-up, recuperación, conversión temporal y finalización al reanudar permanecen OPEN. |
 | TST-SCH-10 | Failure/Recovery | Falla total de lectura CF/Analytics o despacho y luego retry/recovery. | El fallo total de lectura no equivale a audiencia vacía ni marca compras pendientes como procesadas; no avanza cutoff exitoso. `FAILED` es terminal e inmutable. Retry que requiere nueva Execution usa nueva `executionKey` y `recoveryOfExecutionId` o relación equivalente; no se crea una por tick repetido. | P0 | Fault injection, compras candidatas no procesadas antes/después, estado/snapshot inmutable, keys y vínculo de recovery. Completitud/paginación y mecanismo fuente OPEN. |
 | TST-SCH-11 | Failure/Recovery + Integration | Procesamiento completo conforme a política aprobada con algunos resultados individuales fallidos y otros exitosos. | Solo si el conjunto de trabajo se completó según la política de completitud aprobada, Execution puede quedar `COMPLETED_WITH_ERRORS`; conserva cada outcome. Lectura incompleta no se clasifica automáticamente como parcial completada. Aceptación técnica Emblue, estado operativo `SENT` y evento `DELIVERED` permanecen distintos; significado final de SENT OPEN. | P0 | Estado de completitud de fuente, ledger/Attempts por recipient, conteos reconciliados y evidencia de que webhook no cambia automáticamente Attempt. Políticas/contrato OPEN. |
 | TST-SCH-15 | Integration + Failure/Recovery | Recuperación posterior a una Execution terminal `FAILED` que requiera una nueva unidad. | Nunca reabre ni muta la FAILED; usa nueva `executionKey` y referencia `recoveryOfExecutionId` o equivalente. | P0 | Dos filas históricas/snapshots inmutables, unique constraint y vínculo verificable. Algoritmo definitivo OPEN. |
@@ -178,8 +179,46 @@ Hasta que contratos CF/Emblue/Webhook estén disponibles, no se declara aprobado
 | TST-SEC-02 | Security + E2E | Campaign/detail/preview/recipient response incluye accidentalmente email, `purchaseId`, `transactionId` o correlation token. | API no expone campos prohibidos por defecto; se deniega consulta sin permiso específico. | P0 | Snapshot/redaction assertion por ruta y rol. |
 | TST-SEC-03 | Security + Integration | Uso de `surveyUrl` con referencia válida, manipulada, expirada o desconocida; enlazar `ResponseCorrelation` al `CampaignRecipientAttempt` o equivalente. | Solo referencia validada en servidor atribuye la respuesta correctamente a Campaign, Execution y Recipient. `surveyUrl` no incluye PII ni IDs de compra/transacción. Webhook no modifica automáticamente el Attempt. Reutilización se valida cuando se apruebe su regla. | P0 | Requests sintéticos, relación persistida de correlación → Attempt/Execution/Recipient y negative cases. Token, expiración, revocación y reutilización OPEN. |
 | TST-SEC-04 | Security | Webhook/request intenta injection, replay, sobredimensionado o datos extra no reconocidos. | Rechazo o sanitización segura; no se muta estado ni se filtra stack/SQL. | P1 | Respuesta estándar, log sanitizado, controles de tamaño/validación aprobados. |
-| TST-SEC-05 | Security + Integration | Usuario lee Campaign/Execution/recipient sin scope o permiso CASL correspondiente. | 401/403/404 conforme política, sin bypass por URL directa o Angular. | P0 | Matriz roles/abilities y HTTP E2E autenticado. OPEN hasta mapping de roles. |
+| TST-SEC-05 | Security + Integration | ADMIN/SUPERADMIN y roles no autorizados consultan Campaign/Execution/recipient; empresa activa distinta y membresia ADMIN secundaria. | Acceso Campaign sigue solo el rol efectivo y es multiempresa; otros roles reciben 403. | P0 | HTTP autenticado/CASL; recipients conservan permiso/campos OPEN. |
 | TST-SEC-06 | Security | Cargar base con datos sintéticos y buscar texto por email o ID sensible en endpoints/listado. | Búsqueda/ordenamiento no acepta campos no permitidos; logs y resultados respetan minimización. | P1 | Request invalid tests y log/report redacted. |
+
+## 10.1 Escenarios del proveedor MOCK y alcance multiempresa
+
+| ID | Categoría | Escenario | Resultado esperado | Evidencia |
+|---|---|---|---|---|
+| TST-CAT-01 | Unit + HTTP | Consultar cada uno de los seis catálogos con proveedor MOCK explícito. | Devuelve opciones sintéticas con `id`, `label`, `parentId?`, `active`, `source=MOCK`; no incluye Auxiliary Subclassification. | Test de servicio/controller; respuesta sin datos reales. |
+| TST-CAT-02 | Unit + Angular | Cargar opciones con padres, buscar, multiseleccionar, editar y cambiar padres. | Limpia selecciones hijas incompatibles; DRAFT conserva/persiste IDs y los muestra al editar. | Tests de componente/servicio y request/respuesta. |
+| TST-CAT-03 | Unit + HTTP | Guardar DRAFT incompleto y enviar IDs inexistentes, inactivos o de relación incompatible. | DRAFT incompleto es válido; IDs inexistentes/incompatibles se rechazan en backend. | Estado persistido/HTTP y aserciones de proveedor. |
+| TST-CAT-04 | Security + HTTP | Configurar Analytics no implementado, proveedor ausente o fallo del proveedor. | Falla explícitamente; no activa MOCK como fallback. En producción, configurar MOCK impide iniciar el módulo. | Test de factory/configuración y respuesta de error. |
+| TST-CAT-05 | Unit + HTTP | Intentar usar IDs `MOCK-*` bajo Analytics. | Backend rechaza; nunca los interpreta como IDs reales. | Test de validación por proveedor. |
+| TST-CAT-06 | Security + HTTP | ADMIN/SUPERADMIN contra campañas y selector Campaign de Surveys de varias empresas; otros roles y membresía ADMIN secundaria. | Acceso multiempresa solo para rol efectivo ADMIN/SUPERADMIN; los demás reciben 403. Cambiar empresa activa no altera alcance. | HTTP autenticado/CASL; el test no modifica grants generales. |
+| TST-CAT-07 | Regression | Consultar endpoints generales `/surveys` y otros módulos con los mismos roles. | Se conservan sus permisos previos; el endpoint Campaign no amplía autorización general. | Suites relevantes existentes. |
+| TST-CAT-08 | Boundary | Intentar scheduling, Audience Preview real o envío usando MOCK. | No se crea ejecución/recipient ni se solicita correo. | Prueba de no ejecución/fallo explícito; funcionalidades DEFERRED. |
+
+Estas pruebas son evidencia de contrato interno/UI/validación, no compatibilidad CF/Analytics ni evaluación real de audiencia. Relaciones fixture no son reglas CF.
+
+### Trazabilidad de decisiones a trabajo futuro de Sprint 2.5
+
+### Escenarios de localización
+
+| ID | Categoría | Escenario | Resultado esperado | Evidencia |
+|---|---|---|---|---|
+| TST-I18N-01 | Angular | Renderizar todos los estados Campaign/Execution/Recipient/Attempt, frecuencias y modalidades. | Etiquetas en español según FOUND-001; valores técnicos intactos en controles y modelos. | Tests parametrizados de mapeo. |
+| TST-I18N-02 | Angular + HTTP | Filtrar por estado, seleccionar frecuencia/modalidad y guardar. | UI muestra español; solicitud conserva exactamente los enums técnicos, ONE_TIME o FREQUENCY. | Component/service tests con request body y query assertions. |
+| TST-I18N-03 | Angular | Renderizar listado, formulario, detalle, botones, filtros, validaciones, vacíos y confirmación. | Todo texto propio del módulo en español; errores no exponen stack/SQL ni códigos internos crudos. | DOM assertions y casos de error. |
+| TST-I18N-04 | Angular Material | Mostrar fechas, horas y paginador. | Fechas/horas y controles del paginador en español, con formato acordado. | Tests de locale/Intl y MatPaginatorIntl. |
+| TST-I18N-05 | Provider MOCK + Angular | Mostrar opciones sintéticas del proveedor. | Labels españolas y marca MOCK visibles; IDs conservados sin transformación. | Provider assertions y UI/request round trip. |
+
+| Decisiones / regla | SPEC de referencia | Incremento de implementación/QA |
+|---|---|---|
+| DEC-SC-01, DEC-SC-02, RB-097–RB-099 | FOUND-001, API-001 | T25-01: probar CASL por rol efectivo, endpoint Campaign de Surveys multiempresa y no regresión de `/surveys`. |
+| DEC-SC-03, RB-100 | ARCH-001, DATA-001 | T25-02: conservar separación entre Survey.enterpriseId, Company externa e IDs de catálogos; no crear relación PEC inferida. |
+| DEC-SC-04–DEC-SC-07, RB-101–RB-103 | ARCH-001, INTEG-001, API-001 | T25-03: seleccionar provider explícitamente, bloquear MOCK en producción y probar error/no fallback; preservar DTO Angular. |
+| DEC-SC-08–DEC-SC-10, RB-007–RB-018, RB-104 | FOUND-001, DATA-001, API-001 | T25-04: probar opciones, relaciones sintéticas, búsqueda/multiselect, limpieza padre-hijo y validación backend; DRAFT incompleto y campos obligatorios al programar. |
+| DEC-SC-11, RB-105 | ARCH-001, FOUND-001, SCHED-001, INTEG-001 | T25-05: comprobar que MOCK no dispara preview real, execution, recipient ni envío; funcionalidad queda DEFERRED. |
+| DEC-SC-12, RB-006 / OPEN-API-01 | FOUND-001, API-001, ARCH-001 | T25-06: determinar estado técnico de publicación Survey antes de habilitar scheduling. |
+| DEC-SC-13, OPEN-TEST-03 | TEST-001, DATA-001 | T25-07: completar verificación PostgreSQL en rama/base aislada y con fixtures sintéticos no destructivos. |
+| OPEN de Analytics/Emblue | INTEG-001, API-001 | T25-08: incorporar contratos reales aprobados y contract tests; sin endpoints o jerarquías inventados. |
 
 ## 11. Métricas, evidencia y trazabilidad
 
@@ -202,8 +241,8 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 1. Cada regla P0 aplicable tiene al menos una prueba determinista y una evidencia asociada; las pruebas de UI/API necesarias cubren el flujo real.
 2. Todas las transiciones válidas e inválidas de Campaign, Execution y Recipient se verifican sin añadir estados no aprobados.
 3. Survey `PUBLISHED`, Division/Department/Company requeridos, filtros OR/AND, dependencias, offset y Audience Preview pasan sus casos límite.
-4. `ONE_TIME`, las cinco frecuencias, catálogo dinámico, `nextExecutionAt`, month-end, quarterly y EndDate tienen expected results acordados; calendario OPEN no se maquilla con expectations arbitrarias.
-5. Audience Preview y ejecuciones aplican `PurchaseDate + PostPurchaseOffset <= evaluationDate`; congelan `evaluationDate` y `eligibilityCutoffAt` en snapshot y no los cambian entre páginas ni durante recovery. Timezone/conversiones permanecen OPEN hasta aprobación.
+4. `ONE_TIME`, las cinco frecuencias y el catálogo dinámico usan duración inclusiva por fechas calendario y cubren límites 1/6/7/13/14/29/30/89/90. EndDate es inclusiva en fecha local, el slot exacto a SendTime es válido y no se genera uno posterior. MONTHLY/QUARTERLY conservan ancla StartDate, ajustan a fin de mes sin drift y consideran años bisiestos. Recovery/downtime y finalización al reanudar siguen OPEN.
+5. Campaign persiste zona horaria explícita antes de Schedule/Resume; Ecuador usa `America/Guayaquil` por defecto y nunca se infiere la zona del navegador. Audience Preview y ejecuciones aplican `PurchaseDate + PostPurchaseOffset <= evaluationDate`; congelan `evaluationDate` y `eligibilityCutoffAt` en snapshot y no los cambian entre páginas ni durante recovery. La conversión local→UTC debe representar el instante correcto; DST y reglas de otras zonas siguen OPEN.
 6. Integration/concurrency tests en PostgreSQL demuestran `UNIQUE(campaignId, executionKey)`, identidad determinista del slot ordinario, un único claim por slot y deduplicación `campaignId + purchaseId/transactionId` con carreras reales, no solo mocks.
 7. Recovery cubre caída en etapas críticas y downtime con varios slots: lease PROCESSING puede recuperarse en la misma Execution si es seguro; FAILED terminal nunca se reabre; retry nuevo enlaza con `recoveryOfExecutionId`; tick repetido no crea Execution/envío duplicado; reserva expirada no autoriza resend ambiguo.
 8. Fallo total de CF/Analytics no aparece como audiencia vacía ni procesa pendientes. `COMPLETED_WITH_ERRORS` requiere procesamiento completo conforme a política aprobada; lectura incompleta queda sujeta a política OPEN. No se confunde aceptación técnica de Emblue, `SENT` y `DELIVERED`.
@@ -219,11 +258,11 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 |---|---|---|
 | OPEN-TEST-01 | Runner E2E UI y configuración CI de navegador. | Definir herramienta, comando, fixtures y artefactos antes de exigir E2E Angular. |
 | OPEN-TEST-02 | `test:integration` Angular apunta a proyecto/target no encontrado en `angular.json`. | Corregir o retirar script como trabajo separado cuando se apruebe; no asumir que corre hoy. |
-| OPEN-TEST-03 | Base PostgreSQL descartable, migraciones de campaña y estrategia paralela de reset. | Necesaria para claims, unique constraints, transacciones y carreras. |
+| OPEN-TEST-03 | Ambiente PostgreSQL aislado para integración Campaign, cadena de migraciones y fixtures no destructivos. | Sprint 2.4 PostgreSQL continúa pendiente. No ejecutar TRUNCATE/DROP ni modificar filas existentes; usar rama/base aislada antes de probar. |
 | OPEN-TEST-04 | Contrato real, ambiente sandbox y datos sintéticos de CF/Analytics. | Contract/source integration queda pendiente. |
 | OPEN-TEST-05 | Contrato real, credenciales no productivas, templates y sandbox de Emblue. | Contract/send/webhook tests no se certifican sin esta dependencia. |
-| OPEN-TEST-06 | Roles, CASL abilities y scope de Campaign/recipient. | Matriz de pruebas de autorización requiere definición funcional. |
-| OPEN-TEST-07 | `PUBLISHED` técnico, timezone/conversiones de `evaluationDate`/`eligibilityCutoffAt`, DST/month-end/representación de EndDate y catch-up exacto. | No fijar expected tests temporales o de publicación hasta decisión aprobada. |
+| OPEN-TEST-06 | Permisos específicos de recipients/operaciones; el acceso Campaign básico está aprobado solo para ADMIN/SUPERADMIN efectivos y alcance multiempresa. | Probar rol efectivo, denegación a otros roles, independencia de empresa activa y no regresión de otros módulos. |
+| OPEN-TEST-07 | Estado técnico `PUBLISHED`; conversión local→UTC (defecto identificado), DST y reglas para otras zonas, catch-up, recuperación/downtime y finalización al reanudar. | Mantener bloqueado Schedule/Resume; no inferir `PUBLISHED` de `Survey.status = 1`. La regla month-end/ancla queda cubierta por TST-CAL-04/05 y ya no es OPEN. |
 | OPEN-TEST-08 | Retry, resultado ambiguo, reconciliación/idempotencia Emblue, firma/replay/event ID de webhook y reglas de completitud de lectura/fallo parcial. | Bloque failure/recovery y contract permanece bloqueado hasta definir semántica y contratos; `FAILED` terminal no se reabre. |
 | OPEN-TEST-09 | Umbral CI de coverage y calidad, métricas de contract tests y Quality Gate PEC aplicable. | DoD requiere usar Quality Gate vigente sin inventar porcentaje nuevo. |
 | OPEN-TEST-10 | Algoritmo definitivo de `executionKey`, modelo físico de `recoveryOfExecutionId` o equivalente y política de recuperación de reservations/Attempts. | Las pruebas verifican invariantes ya acordadas, pero el contrato físico y el flujo de retry requieren decisión; no autorizar resend ambiguo. |
@@ -232,12 +271,17 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 ## 14. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.2
+- **Version:** 0.4
 - **Tests escritos/ejecutados:** ninguno; este documento define estrategia solamente.
-- **Pendiente:** cerrar OPENs de contratos, permisos, calendario, runners y persistencia antes de convertir cada escenario en implementación automatizada.
+- **Pendiente:** ejecutar suites de catálogos/scope y validación PostgreSQL aislada. Contratos externos, publicación Survey, calendario, runner y recuperación siguen OPEN. Esta actualización no ejecuta pruebas.
 
 ## 15. Historial de cambios
 
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Alineación de elegibilidad temporal con `evaluationDate` y snapshot dual; criterios de fallos totales/parciales y distinción Emblue; pruebas de identidad de ejecución y recovery; cobertura explícita de tarjetas/búsqueda/paginación; ResponseCorrelation vinculada a Attempt; actualización de DoD y OPENs sin cerrar decisiones pendientes. |
+| 0.3 | 2026-10-20 | Añade escenarios de catálogos MOCK, relaciones, DRAFT, autorización multiempresa y regresión; mantiene PostgreSQL pendiente con fixtures no destructivos y aclara que MOCK no prueba contratos externos ni habilita scheduler/envíos. Estado DRAFT. |
+| 0.4 | 2026-10-20 | Agrega pruebas para etiquetas españolas de estados, frecuencias, modalidades, textos, fechas, paginador, MOCK y preservación exacta de payloads. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se cierran los casos de conteo inclusivo y límites exactos de duración; se separa la validación de frecuencia de los OPENs sobre ocurrencias efectivas en EndDate. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Formaliza pruebas para `America/Guayaquil`, zona explícita sin inferencia del navegador y EndDate local inclusiva; mantiene OPEN publicación, conversión local→UTC, DST, catch-up y recuperación. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Agrega casos deterministas MONTHLY/QUARTERLY con ancla StartDate, ajuste a fin de mes, años bisiestos y ausencia de drift acumulativo; mantiene OPEN recovery/downtime. Estado DRAFT conservado. |

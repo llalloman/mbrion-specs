@@ -4,12 +4,12 @@
 |---|---|
 | ID | PEC-SC-API-001 |
 | Estado | DRAFT |
-| Versión | 0.2 |
-| Fecha | 2026-10-18 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Explicaciones en español; rutas, DTOs, enums y nombres técnicos en inglés |
 | Documentos base | `PEC-SC-ARCH-001.md`, `PEC-SC-FOUND-001.md`, `PEC-SC-DATA-001.md` |
 
-> Este documento define el contrato propuesto entre Angular y PEC API. Las rutas nuevas no están implementadas. Se conservan las convenciones verificadas y se marcan como **OPEN** los permisos concretos, contratos externos y reglas que requieren confirmación. No define rutas de CF ni Emblue ni genera código.
+> Este documento define el contrato Angular/PEC API de Campaign. Separa rutas internas existentes de contratos externos OPEN; no define rutas CF/Analytics ni Emblue.
 
 ## 1. Hallazgos de convenciones actuales
 
@@ -24,11 +24,11 @@ Inspeccionados controllers, DTOs, guards, paginación y filtros globales de `pec
 | Respuesta paginada | Hay respuestas `{ data, pagination: { page, perPage, total } }`; otro servicio agrega `totalPages`. Surveys puede agregar metadatos propios dentro de `pagination`. | Para el recurso nuevo se normaliza a `{ data, pagination: { page, perPage, total, totalPages } }`, compatible con el patrón existente. |
 | Respuesta individual | Los controllers suelen devolver el objeto/resultado del service directamente; algunos endpoints de operación devuelven `{ success, message, ... }`. | Recursos Campaign/Execution se devuelven directamente; comandos devuelven el recurso actualizado. |
 | Autenticación | `AuthGuard`, `CaslGuard` y `SurveyAccessGuard` están registrados globalmente. `@Public()` excluye rutas de ese flujo. | Los endpoints administrativos son autenticados; no deben decorarse como públicos. |
-| Autorización | CASL genera `request.abilities`; muchos controllers llaman `PoliciesGuard` y `@CheckPolicies(Action.Read/Create/Update/Delete, subject)`. | Aplicar políticas de recurso a todas las rutas nuevas. El subject y matriz Campaign todavía deben incorporarse/configurarse. |
-| Contexto autenticado | `AuthGuard` adjunta `request.user` (`sspectuser`) y `request.role`; rol trae `user_id`, `enterprise_id` y rol asociado. | El API toma identidad y scope del contexto autenticado; no confía en `createdByUserId` o permisos enviados por Angular. |
+| Autorizacion | Campaign controller usa `PoliciesGuard` y `@CheckPolicies` con subject Campaign; roles efectivos ADMIN/SUPERADMIN tienen grants Campaign aprobados. | Todas las rutas mantienen autenticacion/CASL; no se amplian permisos generales. |
+| Contexto autenticado | `AuthGuard` adjunta `request.user` (`sspectuser`) y `request.role`; rol trae `user_id`, `enterprise_id` y rol asociado. | Campaign deriva identidad y rol efectivo del contexto autenticado; exige CASL y no usa `enterprise_id` ni selección de empresa de Angular como filtro de alcance. |
 | Errores | `GlobalExceptionFilter` devuelve `statusCode`, `timestamp`, `path`, `method`, `message`, `error`, `code` opcional; stack solo en desarrollo. | El contrato conserva esta envoltura. Los códigos funcionales indicados abajo son propuestos, no todos existen hoy. |
 | Errores de validación | `ValidationPipe` y excepciones NestJS; el proyecto usa `BadRequestException`, `NotFoundException`, `ForbiddenException`, `UnauthorizedException` y `ConflictException`. | Usar status HTTP estándar y mensaje comprensible en español, evitando payloads con PII. |
-| Encuestas existentes | `GET /surveys` ya acepta `page`, `perPage`, `enterpriseId`, `status`, `searchText`, `includeArchived` y otros filtros; su respuesta es paginada. `GET /surveys/:id` consulta una encuesta. | Reutilizar la capacidad existente para selección/consulta, con autorización y scope actual. No inventar un endpoint externo ni mapear `status=1` a `PUBLISHED`. |
+| Encuestas existentes | `GET /surveys` and `GET /surveys/:id` keep existing permissions; Campaign selector uses a dedicated endpoint and does not broaden general authorization. |
 
 El backend global requiere autenticación salvo rutas expresamente `@Public()`. El listado `GET /surveys` no usa un `PUBLISHED` explícito verificable: el schema actual tiene `status Int`, `archived` y `content Json`; el significado de publicación requiere validación del módulo Surveys.
 
@@ -44,7 +44,7 @@ El backend global requiere autenticación salvo rutas expresamente `@Public()`. 
 
 ## 3. Seguridad y permisos
 
-Todos los endpoints de este documento son administrativos e internos para Angular, requieren autenticación PEC y verificación de permisos en backend. Los nombres de acciones describen capacidades; su mapeo final a roles PEC y CASL es **OPEN**.
+Todos los endpoints de Campaign requieren autenticacion PEC y CASL backend. APPROVED: solo ADMIN y SUPERADMIN efectivos acceden al modulo multiempresa. La empresa activa PEC no limita Campaign; no se modifican permisos generales de otros modulos.
 
 | Capacidad requerida | Acciones |
 |---|---|
@@ -52,13 +52,31 @@ Todos los endpoints de este documento son administrativos e internos para Angula
 | `Campaign:Create` | Crear Campaign en `DRAFT`. |
 | `Campaign:Update` | Editar configuración en estados permitidos y ejecutar `schedule`, `suspend`, `resume`, `cancel`. Validar estado además del permiso. |
 | `Campaign:Delete` | `DELETE` únicamente para Campaign `DRAFT` sin historial, según política de soft delete aprobada. |
-| `Survey:Read` | Seleccionar Survey existente en el scope autorizado. |
+| `Survey:Read` | No se amplia; el selector Campaign usa `Campaign:Read` en una ruta propia. |
 
-En términos de la convención CASL, se propone usar acciones `Action.Read`, `Action.Create`, `Action.Update` y `Action.Delete` sobre los subjects nuevos de Campaign/Execution/Recipient una vez generados por Prisma. El checkout actual no incluye Campaign en `AppSubjects` ni una matriz de permisos específica. **OPEN:** definir subjects exactos, roles que reciben cada permiso, autorización para datos de recipients y scope por `enterpriseId`.
+Campaign usa el subject CASL Campaign; los grants efectivos ADMIN/SUPERADMIN estan aprobados. Permisos de lectura de recipients y acciones adicionales conservan sus OPENs. Campaign es multiempresa y no filtra por empresa activa.
 
-El API obtiene el usuario actual desde `request.user` y el rol/scope desde `request.role`. El body no puede elegir el creador, ampliar el `enterpriseId` permitido ni actuar sobre Campaign fuera del scope autorizado. Si la existencia del recurso no es visible al usuario, responder de manera que no filtre información entre scopes; regla exacta OPEN.
+El API deriva identidad y rol efectivos de la autenticacion, no confia en la empresa seleccionada en Angular, y exige CASL en cada endpoint Campaign.
+
+## 3.1 Decisiones aprobadas de acceso y proveedor MOCK
+
+- **APPROVED:** todos los endpoints Campaign requieren autenticación y CASL backend. Solo `ADMIN` y `SUPERADMIN` efectivos acceden a Campaigns en todas las empresas; no se usa la empresa activa PEC como filtro.
+- **APPROVED:** `GET /survey-campaigns/surveys` es el selector específico para Campaign. No se amplía autorización de `GET /surveys`; se valida Survey existente y accesible conforme a la política multiempresa Campaign.
+- **APPROVED:** `Enterprise` PEC y `Company` CF/Analytics son conceptos distintos.
+- **MOCK:** contrato interno estable para catálogos Campaign: `GET /survey-campaigns/catalogs/:catalog`, con `catalog` en `divisions`, `departments`, `companies`, `auxiliaryClassifications`, `formats`, `stores`, y query opcional `parentId`. Respuesta arreglo `{ id, label, parentId?, active, source }`; `source` es `MOCK` o `ANALYTICS`. IDs y labels MOCK son sintéticos; las relaciones parent-child solo son demostrativas.
+- MOCK requiere configuración explícita en ambiente no productivo; está prohibido en producción y no es fallback ante error de Analytics. No se definen URL, auth ni formato externo de Analytics.
+- Division, Department y Company pueden faltar en DRAFT y son requeridos para programar; Auxiliary Classification, Format y Store son opcionales. Backend valida IDs, actividad y relaciones con proveedor configurado.
+- **DEFERRED:** Preview real, scheduler y envíos no pueden utilizar MOCK. `Survey.status = 1` no equivale a `PUBLISHED` hasta resolver OPEN-API-01.
+
+### Estado del contrato en checkout
+
+Verificado en el codigo del checkout: existen `GET /survey-campaigns/surveys` y `GET /survey-campaigns/catalogs/:catalog`. Preview y scheduling descritos mas adelante son contratos propuestos y quedan DEFERRED mientras el provider sea MOCK. El filtro actual status=1/archived=false no demuestra estado PUBLISHED (OPEN-API-01).
 
 ## 4. DTOs de referencia
+
+### Regla de idioma de presentación
+
+Los valores de API permanecen técnicos e ingleses. Angular muestra etiquetas españolas desde un mapeo central y envía el enum original en filtros y payloads. Respuestas y errores del API no se mutan para traducir estados ni enums; la UI convierte mensajes conocidos a texto funcional español y oculta detalles internos. Fechas y paginación visibles se localizan en Angular conforme a FOUND-001.
 
 Estos DTOs son formas de contrato, no clases implementadas.
 
@@ -109,7 +127,10 @@ No recibe estado, `nextExecutionAt` ni `lastExecutionAt`; la acción valida la c
 - `ONE_TIME`: `sendDate` y `sendTime` requeridos. `startDate`, `endDate`, `frequency` deben omitirse.
 - `FREQUENCY`: `startDate`, `endDate`, `sendTime` y `frequency` requeridos. `sendDate` debe omitirse.
 - La API verifica fechas coherentes, frecuencia permitida para la duración, Survey `PUBLISHED`, filtros requeridos y `postPurchaseOffset >= 0`.
-- La zona horaria debe ser explícita al activar calendario, pero el identificador definitivo y si se guarda en Campaign son **OPEN**.
+- Para validar una operación efectiva de programación, `durationDays = calendarDayDifference(endDate, startDate) + 1`; se cuentan ambas fechas como fechas de calendario, sin timestamps, diferencias horarias ni conversiones UTC. Un `DRAFT` puede conservar campos incompletos o una frecuencia pendiente de corrección.
+- Para Campaigns de Ecuador, la zona predeterminada aprobada es `America/Guayaquil`. `timeZone` debe persistirse explícitamente en la Campaign antes de una programación efectiva; Angular no la infiere del navegador. DRAFT puede seguir sin zona mientras no se programe.
+- `EndDate` es inclusiva como fecha local de negocio: una ocurrencia exactamente en esa fecha a `SendTime` es válida y no se generan ocurrencias con fecha local posterior. `MONTHLY`/`QUARTERLY` calculan cada ocurrencia desde `StartDate` y su índice; conservan el día original o usan el último día disponible del mes, sin desplazar el ancla, antes de convertir a UTC. Downtime, reanudación y finalización después de recuperación siguen OPEN.
+- Schedule y Resume permanecen bloqueados hasta que se resuelvan `PUBLISHED`, audiencia real, fuente de catálogos no MOCK y las demás precondiciones aprobadas. `Survey.status = 1` no demuestra `PUBLISHED`.
 
 ### 4.3 `AudiencePreviewDto`
 
@@ -174,13 +195,13 @@ Respuesta `200`:
 }
 ```
 
-Cuando se envían ambos campos de búsqueda, se combinan con AND: la Campaign debe coincidir con `searchText` y su Survey con `surveySearchText`. Cada campo solo busca en su nombre correspondiente. Los filtros `status`, `sendType` y `frequency` también se aplican junto con las búsquedas. `status` admite todos los valores de `CampaignStatus`, incluido `CANCELLED`. El listado no incluye configuración completa, emails, recipients ni tokens. Campaign se filtra por scope autorizado del usuario; no se acepta un scope que amplíe permisos.
+La busqueda y paginacion aplican el alcance multiempresa autorizado por CASL, no la empresa activa de PEC.
 
 ### 5.2 Consultar resumen del dashboard
 
 `GET /survey-campaigns/dashboard/summary`
 
-Respuesta `200` (conteos sobre el scope autorizado):
+Respuesta `200` (conteos multiempresa visibles segun CASL):
 
 ```json
 {
@@ -240,7 +261,7 @@ Conflicto de concurrencia/versión y uso de `version` optimista **OPEN**; no ace
 
 Request: sin body; programa la configuración guardada. Respuesta `200`: Campaign actualizada con `status: "SCHEDULED"` y `nextExecutionAt` calculada.
 
-Validaciones: transición permitida; Survey existente, accesible y `PUBLISHED`; segmentation obligatoria completa; offset >= 0; SendType y fechas/hora/frecuencia válidas; frecuencia permitida para la duración; Email Template según regla OPEN. `DRAFT` es el estado esperado para la primera programación; **OPEN:** condiciones exactas para schedule de Campaign `SUSPENDED` deben definirse por separado de Resume.
+Validaciones: transición permitida; Survey existente, accesible y `PUBLISHED`; segmentation obligatoria completa; offset >= 0; SendType y fechas/hora/frecuencia válidas; frecuencia permitida para la duración; `timeZone` persistida; ocurrencias dentro del límite local inclusivo de `EndDate`; Email Template según regla OPEN. `DRAFT` es el estado esperado para la primera programación. **Schedule permanece bloqueado** mientras publicación, audiencia real u otras precondiciones estén sin resolver; `status = 1` no prueba publicación.
 
 ### 5.7 Suspend
 
@@ -252,7 +273,7 @@ Request sin body. Respuesta `200`: Campaign con `status: "SUSPENDED"`. Desde `SC
 
 `PATCH /survey-campaigns/:campaignId/resume`
 
-Request sin body. Respuesta `200`: Campaign reanudada y `nextExecutionAt` según la regla aprobada. Desde `SUSPENDED` solamente. Estado resultante `SCHEDULED` o `ACTIVE` depende de si ya hubo ejecuciones; la fecha vencida durante suspensión y recuperación quedan OPEN según FOUND-001.
+Request sin body. Respuesta `200`: Campaign reanudada y `nextExecutionAt` según la regla aprobada. Desde `SUSPENDED` solamente. Revalidar publicación, audiencia, proveedor real, zona explícita y calendario. Estado resultante `SCHEDULED` o `ACTIVE` depende de si ya hubo ejecuciones; la fecha vencida durante suspensión, recovery y finalización al reanudar quedan OPEN según FOUND-001. **Resume permanece bloqueado** hasta resolver las precondiciones de scheduling.
 
 ### 5.9 Cancel
 
@@ -278,25 +299,16 @@ Estos son endpoints **internos de PEC** que delegan a un adapter de catálogo. N
 
 | Método y ruta | Parámetros requeridos/opcionales | Dependencia funcional |
 |---|---|---|
-| `GET /survey-campaigns/segmentation/divisions` | `page`, `perPage`, `searchText` | Catálogo raíz de Division. |
-| `GET /survey-campaigns/segmentation/departments` | `divisionIds` requerido, `page`, `perPage`, `searchText` | Department dependiente de Division. |
-| `GET /survey-campaigns/segmentation/auxiliary-classifications` | `parentIds` opcional según contrato, `page`, `perPage`, `searchText` | Auxiliary Classification opcional; dependencia padre exacta OPEN. |
-| `GET /survey-campaigns/segmentation/companies` | `page`, `perPage`, `searchText` | Catálogo raíz Company. |
-| `GET /survey-campaigns/segmentation/formats` | `companyIds` según jerarquía, `page`, `perPage`, `searchText` | Format opcional, dependencia exacta OPEN. |
-| `GET /survey-campaigns/segmentation/stores` | `companyIds` y/o `formatIds` según contrato, `page`, `perPage`, `searchText` | Store opcional, dependencia exacta OPEN. |
+| `GET /survey-campaigns/catalogs/divisions` | `parentId` opcional | Division del proveedor Campaign. |
+| `GET /survey-campaigns/catalogs/departments` | `parentId` opcional | Department filtrado por la relacion del proveedor. |
+| `GET /survey-campaigns/catalogs/auxiliaryClassifications` | `parentId` opcional | Auxiliary Classification opcional. |
+| `GET /survey-campaigns/catalogs/companies` | `parentId` opcional | Company externa, distinta de Enterprise PEC. |
+| `GET /survey-campaigns/catalogs/formats` | `parentId` opcional | Format opcional; relacion real externa OPEN. |
+| `GET /survey-campaigns/catalogs/stores` | `parentId` opcional | Store opcional; relacion real externa OPEN. |
 
-La serialización de arrays repetidos en query (`divisionIds=...&divisionIds=...` o CSV) se debe fijar al implementar y documentar en OpenAPI. Respuesta `200` para todos:
+Respuesta 200: arreglo de `{ id, label, parentId?, active, source }`. No pagina; `source` identifica MOCK o ANALYTICS. IDs y labels MOCK son sinteticos; relaciones de demostracion.
 
-```json
-{
-  "data": [
-    { "externalId": "DEP-10", "label": "Hogar", "parentExternalId": "DIV-01" }
-  ],
-  "pagination": { "page": 1, "perPage": 10, "total": 1, "totalPages": 1 }
-}
-```
-
-Las selecciones son multiselect. `Auxiliary Subclassification` no tiene endpoint v1. Cambio de parent invalida/remueve selecciones hijas incompatibles. Error o falta de disponibilidad del catálogo debe devolver fallo trazable, no catálogo vacío como si no existieran valores. **OPEN:** fuente y conexión, claves, compatibilidad de padres, cache/frescura y máximos de paginación. En NestJS, declarar rutas estáticas (`dashboard`, `segmentation`, `audience`) antes de rutas con `:campaignId` para evitar ambigüedad.
+Las selecciones son multiselect. Auxiliary Subclassification no tiene endpoint v1. Al cambiar parent se limpian hijos incompatibles y backend revalida IDs/relaciones. Catalogo no configurado falla y no hace fallback a MOCK. Jerarquias reales, autenticacion Analytics, frescura y paginacion externa siguen OPEN.
 
 ## 7. Audience Preview
 
@@ -363,9 +375,9 @@ No se define endpoint `exclusions` para v1. La exclusión de compras ya procesad
 
 Reutilizar las capacidades existentes, sin duplicar SurveyJS ni crear en este documento una ruta de integración externa:
 
-- `GET /surveys?page=1&perPage=10&enterpriseId={id}&searchText={text}&status=1&includeArchived=false` es el listado existente y paginado. Su respuesta incluye `{ data, pagination }` y puede agregar filtros/metadatos específicos.
-- `GET /surveys/:id` es el detalle existente.
-- La UI presenta encuestas disponibles en el scope autorizado. `status=1` y `includeArchived=false` reflejan filtros existentes; **no equivalen por sí solos a `PUBLISHED`**.
+- `GET /surveys` y `GET /surveys/:id` son rutas generales con permisos actuales; Campaign no las usa para ampliar acceso.
+- `GET /survey-campaigns/surveys` lista Surveys accesibles al selector Campaign bajo CASL Campaign, para varias empresas; no concede permisos generales Survey.
+- El selector Campaign usa actualmente status=1 y archived=false. Esto no demuestra que status=1 equivalga a PUBLISHED (OPEN-API-01).
 - Al programar, el API debe validar en servidor la regla funcional `PUBLISHED`, además de existencia, archivado y disponibilidad que correspondan.
 - **OPEN:** definición técnica de `PUBLISHED` y campos mínimos/response de Survey elegible. No cambiar el significado de `status` existente por conveniencia del nuevo módulo.
 
@@ -436,11 +448,11 @@ Envoltura de error conforme a `GlobalExceptionFilter` actual:
 | Cancel | `PATCH /survey-campaigns/:campaignId/cancel` |
 | Delete DRAFT elegible | `DELETE /survey-campaigns/:campaignId` |
 | Preview de audiencia | `POST /survey-campaigns/audience/preview` |
-| Catálogos internos | `GET /survey-campaigns/segmentation/{divisions,departments,auxiliary-classifications,companies,formats,stores}` |
+| Catalogos Campaign | `GET /survey-campaigns/catalogs/:catalog` con `parentId` opcional |
 | Listar executions | `GET /survey-campaigns/:campaignId/executions` |
 | Ver execution | `GET /survey-campaigns/:campaignId/executions/:executionId` |
 | Listar recipients | `GET /survey-campaigns/:campaignId/executions/:executionId/recipients` |
-| Consultar Surveys existentes | `GET /surveys`, `GET /surveys/:id` (rutas actuales) |
+| Selector Campaign de Surveys | `GET /survey-campaigns/surveys` |
 | Exclusions | Sin endpoint v1; usar deduplicación ledger de recipients. |
 
 En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText` busca Survey Name; si ambos se envían se combinan con AND. `status` admite todos los valores de CampaignStatus, incluido `CANCELLED`.
@@ -448,12 +460,12 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 ## 14. OPENs de contrato
 
 - **OPEN-API-01:** Mapear `PUBLISHED` al modelo y servicio Survey real; el contrato existente usa `status` entero y `archived`, no enum publicado verificado.
-- **OPEN-API-02:** Confirmar si Campaign tiene scope `enterpriseId`, cómo se relaciona con usuario autenticado y Survey, y cómo se aplica CASL.
-- **OPEN-API-03:** Aprobar roles/abilities y permiso separado para visualizar recipients.
+- **OPEN-API-02:** Roles efectivos y alcance multiempresa Campaign estan aprobados: ADMIN/SUPERADMIN. Verificar acceso a Surveys conforme a politica aprobada y no regresion en otros modulos.
+- **OPEN-API-03:** Permiso y campos autorizados especificos para consultar recipients; no cambia el acceso Campaign basico aprobado.
 - **OPEN-API-04:** Compleción mínima permitida de `DRAFT` y obligatoriedad/identificador de `emailTemplateExternalId`.
 - **OPEN-API-05:** Fuente de catálogos/audiencia, dependencias de padres y representación/serialización de arrays de IDs externos.
 - **OPEN-API-06:** Límites de `perPage` y `sampleSize`, allowlists finales de ordenamiento y normalización/case-sensitivity de las búsquedas; los campos, combinación AND y significado de `total` quedan fijados en este contrato.
-- **OPEN-API-07:** Zona horaria, interpretación de fecha/hora, duración exacta para catálogo dinámico y comportamiento de End Date.
+- **OPEN-API-07 (parcial):** Cerrados: `America/Guayaquil` como zona predeterminada para Ecuador, persistencia explícita de `timeZone` antes de programación efectiva, no inferencia del navegador, `EndDate` local inclusiva y regla de anclaje/ajuste de fin de mes para `MONTHLY`/`QUARTERLY`. OPEN: otros mercados, conversión local/UTC, DST/horas ambiguas y el efecto de downtime/reanudación/finalización.
 - **OPEN-API-08:** Política idempotente de comandos ante estado ya objetivo; `Idempotency-Key` y control por `version`/ETag.
 - **OPEN-API-09:** Campos enmascarados autorizados de Recipient, registro/auditoría de consultas y tratamiento de errores del proveedor.
 - **OPEN-API-10:** Soft delete para DRAFT sin historial; DATA-001 marca `deletedAt` como propuesta, no patrón PEC global verificado.
@@ -475,19 +487,24 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 - No existe endpoint Campaign para borrar historial ni se elimina Campaign con historial.
 - Los estados y nombres de enums coinciden con FOUND/DATA; filtros de segmentación conservan multiselect y dependencias, sin Auxiliary Subclassification v1.
 - Las respuestas de error conservan la envoltura del filtro global, con códigos funcionales estables cuando se aprueben.
-- Encuestas se consultan con capacidades existentes de `/surveys`; el contrato no inventa que `status=1` signifique `PUBLISHED`.
-- No se definen rutas de CF/Emblue, controllers, código, migraciones ni schema Prisma.
+- Campaign selector uses dedicated `GET /survey-campaigns/surveys`, protected by CASL Campaign; general `/surveys` permissions stay unchanged.
+- No se definen contratos externos Analytics/Emblue ni se habilitan scheduler, audiencia real o envios con MOCK.
 
 ## 16. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.2
+- **Version:** 0.4
 - **Fuentes revisadas:** ARCH-001, FOUND-001, DATA-001, controllers/DTOs/guards/pipes y filtro global de `pec-api`.
-- **Pendiente:** resolver OPENs de permisos, Survey publication, CF/Analytics, calendario, datos de recipients y contratos de integración antes de implementar.
-- **Artefactos deliberadamente no generados:** controllers, DTOs TypeScript, código, migraciones y rutas de proveedores externos.
+- **Pendiente:** resolver permisos especificos de recipients, Survey PUBLISHED, contratos CF/Analytics/Emblue y reglas temporales/operativas OPEN.
+- **No incluidos en este contrato:** rutas de proveedores externos, politica Analytics real, implementacion de scheduler/envios y migraciones ejecutadas por este documento.
 
 ## 17. Historial de cambios
 
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Se añade búsqueda por Survey Name y su combinación con Campaign Name; se define el total del dashboard; se incorpora `evaluationDate` al Preview; se especifica la respuesta de outcomes por Execution distinguiendo ledger, attempts y duplicados. |
+| 0.3 | 2026-10-20 | Se incorpora acceso multiempresa ADMIN/SUPERADMIN, selector Campaign de Surveys y contrato MOCK estable de seis catálogos con datos sintéticos y límite producción/fallback. Preview real, scheduler y envíos con MOCK quedan diferidos; `PUBLISHED` sigue OPEN. DRAFT se conserva. |
+| 0.4 | 2026-10-20 | Se separan etiquetas de UI en español de enums y valores API; se documenta localización de fechas/paginador y tratamiento de errores. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se cierra en OPEN-API-07 el cálculo inclusivo de duración para validar frecuencias; zona horaria y End Date de ejecución permanecen OPEN. Se aclara que los borradores pueden conservar configuración pendiente. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se aprueba la zona predeterminada `America/Guayaquil` para Ecuador, su persistencia explícita antes de programar y EndDate local inclusiva; no inferir zona del navegador. Schedule/Resume quedan bloqueados hasta resolver publicación, audiencia real y precondiciones. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Documenta cálculo local anclado a StartDate y ajuste MONTHLY/QUARTERLY al último día del mes, sin drift y antes de UTC; no modifica payload ni modelo. Estado DRAFT conservado. |

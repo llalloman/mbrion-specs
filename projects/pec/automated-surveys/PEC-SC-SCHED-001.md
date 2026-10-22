@@ -7,7 +7,8 @@
 | Documento | PEC-SC-SCHED-001 |
 | Título | Diseño de Scheduling y Ejecución - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.2 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos en inglés |
 
 > Este documento define el diseño propuesto para planificar y ejecutar campañas. Los requisitos funcionales provienen de FOUND-001; las entidades y restricciones conceptuales, de DATA-001. Las decisiones aún no aprobadas se marcan como **OPEN**. El pseudocódigo y los diagramas son ilustrativos, no código productivo.
@@ -29,6 +30,10 @@ Principios:
 
 ## 2. Fuentes y límites de certeza
 
+### 2.3 Presentación en español
+
+Los estados y modalidades conservan sus valores técnicos en inglés durante la ejecución. La interfaz Angular muestra sus equivalencias en español conforme al mapeo centralizado documentado en FOUND-001. `COMPLETED` se presenta como **Finalizada** para Campaign y Execution; `ONE_TIME`, como **Una sola vez**. Esta regla de presentación no habilita ni implementa el scheduler.
+
 ### 2.1 Verificado en código del checkout
 
 - `@nestjs/schedule` está instalado; `ScheduleModule.forRoot()` se registra en `pec-api/src/app.module.ts`.
@@ -46,6 +51,8 @@ Principios:
 - Frecuencias: `DAILY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`, calculadas por calendario como +1 día, +7 días, +14 días, +1 mes calendario y +3 meses calendario.
 - `FREQUENCY` requiere `Start Date`, `End Date`, `Send Time` y `Frequency`; `ONE_TIME` requiere `Send Date` y `Send Time`.
 - Campaign queda `SCHEDULED` antes de su primera ejecución; pasa a `ACTIVE` después de ejecutar si todavía existen ocurrencias futuras. Cuando la siguiente ejecución supera `End Date`, la Campaign termina `COMPLETED`.
+- Para Campaigns de Ecuador, la zona predeterminada aprobada es `America/Guayaquil`; cada Campaign debe persistir explícitamente `timeZone` antes de Schedule/Resume efectivos. No se infiere la zona del navegador.
+- `EndDate` es inclusiva como fecha local de negocio: una ocurrencia exactamente en `EndDate` a `SendTime` es válida; no se generan ocurrencias con fecha local posterior.
 - Execution: `PENDING → PROCESSING → COMPLETED | COMPLETED_WITH_ERRORS | FAILED`.
 - Una Campaign recurrente obtiene audiencia incremental; no reenvía una compra ya procesada en esa Campaign.
 - Compras elegibles por fecha cumplen `PurchaseDate + PostPurchaseOffset <= evaluationDate` (fecha de negocio; no el timestamp técnico de evaluación).
@@ -54,7 +61,18 @@ Principios:
 
 ### 2.3 Propuestas y OPENs
 
-El claim transaccional/lease, la semántica ante caída a mitad de envío, el cálculo exacto de catch-up, timezone/DST, calendario de fin de mes, definición de éxito del cutoff, retry de destinatarios y límites de lotes requieren decisión técnica/operativa. Este documento propone opciones seguras sin etiquetarlas como comportamiento implementado.
+El claim transaccional/lease, la semántica ante caída a mitad de envío, el cálculo exacto de catch-up, timezone/DST, definición de éxito del cutoff, retry de destinatarios y límites de lotes requieren decisión técnica/operativa. La política de recurrencia al fin de mes está aprobada y se detalla en la sección 4.2. Este documento propone opciones seguras sin etiquetarlas como comportamiento implementado.
+
+## 2.4 Estado de Sprint 2.5 y límites aprobados
+
+Los estados y frecuencias permanecen en inglés dentro de datos, eventos y lógica de scheduling. Si se muestran en interfaz, se usan las etiquetas españolas centralizadas de FOUND-001. La localización no transforma el payload ni cambia fechas técnicas, calendario, enums o transiciones.
+
+- **APPROVED:** Division, Department y Company son obligatorios para programar; filtros opcionales no bloquean DRAFT.
+- **MOCK:** el proveedor temporal solo contiene catálogos sintéticos y relaciones de demostración. No representa compras, clientes ni contratos reales CF/Analytics.
+- **DEFERRED:** no activar scheduler, resolver audiencia, crear recipients ni enviar correo cuando los catálogos MOCK sean el proveedor configurado. Este documento describe el diseño futuro y no autoriza su ejecución.
+- **OPEN:** `Survey.status = 1` no está confirmado como `PUBLISHED`; ningún flujo de scheduling puede considerarse habilitado por ese valor sin evidencia del módulo Surveys.
+- **OPEN:** la validación PostgreSQL del Sprint 2.4 sigue pendiente; ninguna sección de diseño constituye evidencia de migración/relaciones probadas en Neon.
+- **DEFERRED/BLOCKED:** Schedule y Resume no se habilitan mientras falten el estado técnico de publicación, contratos de audiencia real y las demás precondiciones; el catálogo MOCK no puede autorizar audiencia ni ejecución.
 
 ## 3. Modelo temporal
 
@@ -71,7 +89,7 @@ El claim transaccional/lease, la semántica ante caída a mitad de envío, el c�
 
 ### 3.2 Instante de evaluación y zona horaria
 
-Para una ejecución ordinaria, `eligibilityCutoffAt` es el instante técnico capturado al iniciar la resolución y `evaluationDate` es la fecha de negocio derivada/aprobada para aplicar la regla `PurchaseDate + PostPurchaseOffset <= evaluationDate`. Ambos valores efectivos se persisten antes de leer la primera página y se reutilizan tras reinicio. Zona IANA, DST, conversiones entre timestamp y fecha, y regla exacta de corte están **OPEN**.
+Para una ejecución ordinaria, `eligibilityCutoffAt` es el instante técnico capturado al iniciar la resolución y `evaluationDate` es la fecha de negocio derivada/aprobada para aplicar la regla `PurchaseDate + PostPurchaseOffset <= evaluationDate`. Ambos valores efectivos se persisten antes de leer la primera página y se reutilizan tras reinicio. La programación usa el `timeZone` explícito y persistido de Campaign; para Ecuador, su default es `America/Guayaquil`. La conversión de cutoff/evaluationDate para elegibilidad de audiencia, otros mercados, DST y la regla exacta de corte permanecen **OPEN**.
 
 En recuperación tras downtime, `scheduledAt` original y valores efectivos de evaluación pueden diferir. Se propone congelar el instante técnico y `evaluationDate` al iniciar la resolución de la recuperación, registrar el slot original y conservar ambos en el snapshot. Así se pueden considerar compras cuyo offset ya sea elegible en esa fecha de negocio consolidada. La conversión y semántica exactas deben confirmarse antes de implementación.
 
@@ -88,7 +106,7 @@ Una Execution `FAILED` es terminal e inmutable y no cuenta como audiencia proces
 
 ### 4.2 `FREQUENCY`
 
-La primera ocurrencia es `StartDate + SendTime`. Las siguientes se calculan de forma recursiva desde la ocurrencia anterior, usando aritmética de calendario:
+La primera ocurrencia es `StartDate + SendTime`. Cada ocurrencia se calcula desde la fecha original `StartDate` y su índice de recurrencia, usando aritmética sobre fechas locales de calendario antes de convertirla a UTC:
 
 | Frequency | Avance conceptual |
 |---|---|
@@ -98,17 +116,18 @@ La primera ocurrencia es `StartDate + SendTime`. Las siguientes se calculan de f
 | `MONTHLY` | 1 mes calendario |
 | `QUARTERLY` | 3 meses calendario |
 
-Para meses con menos días que la fecha ancla, el resultado puede depender de una regla de normalización (por ejemplo, último día del mes frente a desbordamiento). Esa regla y el anclaje de las siguientes ocurrencias son **OPEN**. No sustituir meses/trimestres por un número fijo de días.
+En `MONTHLY` y `QUARTERLY` se conserva el día de `StartDate` como ancla. Si el mes de destino no contiene ese día, la ocurrencia usa el último día disponible de ese mes; la normalización no reemplaza ni desplaza el ancla para ocurrencias posteriores. Aplica a años bisiestos. Ejemplo: `2026-01-31` mensual produce `2026-02-28`, `2026-03-31`, `2026-04-30`. No sustituir meses/trimestres por un número fijo de días.
 
-La frecuencia permitida también debe validar la duración entre Start y End conforme a FOUND-001: 1–6 días admite DAILY; 7–13 DAILY/WEEKLY; 14–29 DAILY/WEEKLY/BIWEEKLY; 30–89 añade MONTHLY; 90 o más admite todas, incluida QUARTERLY.
+La frecuencia permitida también valida la duración inclusiva entre Start y End conforme a FOUND-001: `durationDays = calendarDayDifference(endDate, startDate) + 1`. Ambas fechas cuentan como fechas de calendario, sin diferencias horarias, timestamps ni conversiones UTC. 1–6 días admite DAILY; 7–13 DAILY/WEEKLY; 14–29 DAILY/WEEKLY/BIWEEKLY; 30–89 añade MONTHLY; 90 o más admite todas, incluida QUARTERLY. La ocurrencia se interpreta con el `timeZone` persistido de Campaign.
 
 ### 4.3 `EndDate`
 
 - `EndDate` limita ocurrencias de calendario y no filtra compras ni sus fechas.
-- Si `EndDate` representa una fecha local inclusiva, las ocurrencias del último día pueden ser válidas hasta el límite de ese día local. Conceptualmente, la comparación es entre timestamps de ocurrencia y el límite temporal correspondiente a esa fecha local, no una comparación directa ambigua entre `DATE` y `TIMESTAMP`.
-- Cuando la siguiente ocurrencia queda después de ese límite, no se crea; Campaign solo pasa a `COMPLETED` cuando no queden trabajos pendientes de recuperación cuya política siga sin resolver.
-- Esta interpretación respeta la regla FOUND “COMPLETED cuando la siguiente ejecución supera End Date”.
-- **OPEN:** representación definitiva de `EndDate` (fecha local o timestamp), timezone, DST y conversión a límite comparable; si una ejecución que empieza antes del límite pero termina después se completa; comportamiento de suspensión/downtime que atraviesa EndDate.
+- `EndDate` es una fecha local inclusiva de negocio evaluada en `Campaign.timeZone`.
+- Una ocurrencia programada exactamente en `EndDate` a `SendTime` es válida.
+- No se generan ocurrencias cuya fecha local sea posterior a `EndDate`.
+- En operación ordinaria, la recurrencia termina cuando no existe una próxima ocurrencia dentro de la ventana; la transición a `COMPLETED` no debe ignorar trabajo de recuperación pendiente.
+- **OPEN:** si una ejecución iniciada antes del límite termina después; qué hacer ante downtime o suspensión que atraviese EndDate; catch-up/reanudación tras expiración; conversión local a timestamp y DST. Estos OPENs no cambian la regla de no crear ocurrencias posteriores.
 
 ### 4.4 Avance seguro de `nextExecutionAt`
 
@@ -567,9 +586,9 @@ Alertar por executions atascadas, lease expirado recurrente, crecimiento de back
 | OPEN-SCHED-01 | Mecanismo de claim: row lock/`SKIP LOCKED`, conditional update/lease o advisory lock; validar Postgres/Prisma y concurrencia. |
 | OPEN-SCHED-02 | Duración/renovación del lease, detección de stale work y propietario del worker. |
 | OPEN-SCHED-03 | Intervalo global, batch size, límites por pod/global, workers/cola y fairness. |
-| OPEN-SCHED-04 | Zona IANA, DST, horas inexistentes/repetidas y relación entre fechas locales y timestamps. |
-| OPEN-SCHED-05 | Aritmética mensual/trimestral cuando el día no exista; anclaje de frecuencia. |
-| OPEN-SCHED-06 | Representación definitiva de `EndDate`, timezone/DST y conversión al límite local; ejecución en curso y campaña que expira durante suspensión/downtime. Conceptualmente, fecha local inclusiva permite ocurrencias del último día hasta su límite local. |
+| OPEN-SCHED-04 | Default Ecuador `America/Guayaquil`, persistencia explícita en Campaign y no inferencia del navegador están aprobados. Siguen OPEN otras zonas de negocio, DST, horas inexistentes/repetidas y conversión de fechas locales a instantes. |
+| OPEN-SCHED-05 | **Cerrado en Sprint 2.8.1:** `MONTHLY`/`QUARTERLY` conservan el día de `StartDate`; cuando no existe, usan el último día del mes sin cambiar el ancla. Las ocurrencias se calculan desde StartDate y el índice, incluidos años bisiestos. |
+| OPEN-SCHED-06 | Regla base de EndDate cerrada: fecha local inclusiva; el slot en EndDate a SendTime es válido y no hay slots posteriores. Siguen OPEN ejecución en curso que cruza el límite, downtime/suspensión/recovery al expirar, finalización al reanudar, timezone de otros mercados y conversión/DST. |
 | OPEN-SCHED-07 | Algoritmo definitivo de `executionKey` para slot ordinario, catch-up consolidado y retry; la unicidad por Campaign + key es requerida, retries nuevos enlazan la ejecución original. |
 | OPEN-SCHED-08 | Si se adopta cutoff exitoso global (propuesta opcional), su persistencia/criterio ante fuente parcial, `FAILED` y `COMPLETED_WITH_ERRORS`; nunca reemplaza ledger/deduplicación Campaign + Purchase. |
 | OPEN-SCHED-09 | Catch-up: primer/último slot, ventana máxima, reanudación de suspendida y qué hacer al expirar EndDate. |
@@ -586,7 +605,7 @@ Alertar por executions atascadas, lease expirado recurrente, crecimiento de back
 Antes de implementar el scheduler productivo:
 
 - seleccionar y probar un claim compartido que impida doble ejecución con múltiples réplicas;
-- acordar timezone, calendario y conversión de `EndDate`; evitar comparar directamente fecha y timestamp sin normalización definida;
+- persistir `Campaign.timeZone` antes de programar (default Ecuador `America/Guayaquil`) y evaluar EndDate como fecha local inclusiva; definir y probar la conversión a instantes, otros mercados, DST y casos OPEN de recovery/reanudación;
 - congelar `eligibilityCutoffAt` técnico y `evaluationDate` de negocio en el snapshot al iniciar audiencia y reutilizarlos tras reinicios;
 - garantizar que `FAILED` sea terminal, no procese compras pendientes ni avance cutoff exitoso, y no cierre Campaign con recuperación pendiente sin política resuelta;
 - garantizar `UNIQUE(campaignId, executionKey)`, identidad determinista del slot y que ticks repetidos no creen nuevas ejecuciones; recovery nuevo enlazado con nueva key cuando corresponda;
@@ -603,3 +622,8 @@ La existencia de `@nestjs/schedule`, transacciones Prisma en otros flujos o un `
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Aclaración de EndDate inclusivo y calendario; inmutabilidad de FAILED y recuperación pendiente; claves idempotentes y relación de retries; separación de `eligibilityCutoffAt`/`evaluationDate`; recuperación segura de reservas y resultados ambiguos; cutoff global opcional, no watermark obligatorio. |
+| 0.3 | 2026-10-20 | Se aclara que diseño de scheduler queda DEFERRED con proveedor MOCK; catálogos sintéticos no crean audiencia ni recipients; `PUBLISHED` y validación PostgreSQL permanecen OPEN. El documento permanece DRAFT. |
+| 0.4 | 2026-10-20 | Se agrega la regla de presentación en español de estados y modalidades; valores técnicos en inglés. El documento permanece DRAFT. |
+| 0.4 | 2026-10-21 | Se cierra la duración inclusiva de recurrencias para validar la frecuencia permitida; el conteo usa fechas de calendario y no resuelve timezone, DST ni el límite de ocurrencia EndDate. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se aprueba timezone explícito por Campaign, default `America/Guayaquil` para Ecuador y EndDate local inclusiva, válida a SendTime y sin ocurrencias posteriores. Recovery, downtime, finalización al reanudar, DST y conversión permanecen OPEN; Schedule/Resume bloqueados por publicación y audiencia. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Se aprueba la regla MONTHLY/QUARTERLY de anclaje a StartDate y ajuste al último día del mes sin desplazamiento acumulativo, también en años bisiestos; la operación se realiza sobre calendario local antes de UTC. Estado DRAFT conservado. |

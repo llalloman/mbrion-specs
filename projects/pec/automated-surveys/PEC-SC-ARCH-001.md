@@ -4,12 +4,12 @@
 |---|---|
 | ID | PEC-SC-ARCH-001 |
 | Estado | DRAFT |
-| Versión | 0.2 |
-| Fecha | 2026-10-18 |
+| Versión | 0.4 |
+| Fecha | 2026-10-20 |
 | Idioma | Español; nombres de código en inglés |
 | Baseline funcional | Requisitos aprobados entregados para este informe |
 
-> Este documento describe una arquitectura propuesta y su encaje con el repositorio inspeccionado. No define todavía el schema Prisma definitivo, endpoints, tareas de implementación, código ni migraciones. Los puntos no comprobables se marcan como **OPEN**.
+> Este documento registra arquitectura, decisiones aprobadas y limites de la implementacion Campaign inspeccionada. Los contratos externos, la habilitacion real de scheduling y los OPENs se identifican por separado. Esta version no aprueba formalmente los SPECS.
 
 ## 1. Objetivo
 
@@ -72,7 +72,31 @@ pec-public-surveys-web
 
 El esquema y los nombres del diagrama representan componentes inspeccionados. La integración exacta entre el sitio público y la atribución de campañas se debe validar antes de implementarla.
 
+## Decisiones del incremento 2.5
+
+| ID | Estado | Decisión |
+|---|---|---|
+| DEC-SC-01 | **APPROVED** | Campaign es multiempresa; solo `ADMIN` y `SUPERADMIN` consultan y gestionan campañas de todas las empresas. La empresa activa PEC no limita el módulo. Autenticación y CASL backend siguen obligatorios; no cambian grants de otros módulos. |
+| DEC-SC-02 | **APPROVED** | El selector usa un endpoint de Campaign para Surveys y no amplía permisos generales de Surveys. Survey debe existir y ser accesible bajo la política aprobada. |
+| DEC-SC-03 | **APPROVED** | `Enterprise` PEC y `Company` CF/Analytics son conceptos distintos; no asumir equivalencias ni relaciones entre identificadores. |
+| DEC-SC-04 | **OPEN** | Los contratos reales de catálogos CF/Analytics no están disponibles; no fijar endpoints, autenticación, campos ni jerarquías reales. |
+| DEC-SC-05 | **MOCK** | Proveedor temporal con datos sintéticos marcados MOCK; sus relaciones solo sirven para probar controles y no representan jerarquías confirmadas de CF. |
+| DEC-SC-06 | **APPROVED** | El proveedor Analytics futuro debe sustituir al MOCK sin cambiar el contrato Angular. |
+| DEC-SC-07 | **APPROVED** | MOCK se deshabilita por defecto en producción y nunca es fallback automático ante fallo de Analytics. Sin proveedor, el backend falla explícitamente. |
+| DEC-SC-08 | **APPROVED** | Division, Department y Company son obligatorios para programar, pero pueden faltar en DRAFT. |
+| DEC-SC-09 | **APPROVED** | Auxiliary Classification, Format y Store son opcionales; Auxiliary Subclassification se excluye de V1. |
+| DEC-SC-10 | **APPROVED** | Se admite multiselección, OR dentro del filtro y AND entre filtros. Backend valida IDs y relaciones contra el proveedor configurado; jerarquías MOCK no se atribuyen a CF. |
+| DEC-SC-11 | **DEFERRED** | Scheduler, evaluación de audiencia real y envíos no pueden usar catálogos MOCK. |
+| DEC-SC-12 | **OPEN** | No se ha demostrado que `Survey.status = 1` signifique `PUBLISHED`; scheduling queda bloqueado hasta verificarlo. |
+| DEC-SC-13 | **OPEN** | La validación PostgreSQL del Sprint 2.4 continúa pendiente. No se hicieron operaciones remotas en esta actualización. |
+
+Este registro no cambia el estado formal DRAFT ni equivale a aprobación documental.
+
 ## 4. Baseline funcional
+
+### Regla de idioma de interfaz
+
+Toda la UI Campaign se presenta en español. Angular centraliza etiquetas por enums, frecuencias y modalidades; el backend, API, Prisma y PostgreSQL conservan nombres y valores técnicos en inglés. Traducción visible nunca modifica filtros ni payloads. Formatos de fecha, hora y paginador deben usar español. El glosario funcional y las equivalencias obligatorias están en FOUND-001; los detalles de pruebas están en TEST-001.
 
 Los siguientes requisitos se toman del baseline entregado para este documento. No son decisiones derivadas del código.
 
@@ -91,11 +115,11 @@ Los siguientes requisitos se toman del baseline entregado para este documento. N
 | Producto | `Department` | Requerido, multiselect |
 | Producto | `Auxiliary Classification` | Opcional, multiselect |
 | Producto | `Auxiliary Subclassification` | Fuera de alcance v1 |
-| Comercial | `Company` | Requerido, multiselect |
+| Comercial | `Company` externo | Requerido para programar, multiselect |
 | Comercial | `Format` | Opcional, multiselect |
 | Comercial | `Store` | Opcional, multiselect |
 
-- Dentro de cada filtro, los valores seleccionados se combinan con OR; entre filtros distintos se combinan con AND.
+- Dentro de cada filtro, los valores seleccionados se combinan con OR; entre filtros distintos se combinan con AND. Enterprise PEC no equivale a Company CF/Analytics. Division, Department y Company pueden faltar en DRAFT y se exigen al programar.
 - Un filtro opcional vacío no restringe resultados. Al cambiar un padre se limpian selecciones hijas incompatibles.
 - `Post-purchase Offset` es obligatorio, entero no negativo, en días. `0` significa sin espera adicional.
 - Una compra se vuelve elegible cuando cumple la segmentación y `PurchaseDate + Offset <= ExecutionDate`, y no ha sido procesada antes por esa campaña.
@@ -130,7 +154,7 @@ El catálogo permitido depende de la duración entre fechas:
 | 30-89 días | `DAILY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY` |
 | 90 días o más | Todas, incluyendo `QUARTERLY` |
 
-`nextExecutionAt` se calcula con aritmética de calendario: `DAILY` +1 día, `WEEKLY` +7 días, `BIWEEKLY` +14 días, `MONTHLY` +1 mes calendario y `QUARTERLY` +3 meses calendario. `ONE_TIME` termina tras su ejecución única. `FREQUENCY` termina cuando la siguiente ejecución supera `End Date`.
+`nextExecutionAt` se calcula sobre fechas locales: `DAILY` +1 día, `WEEKLY` +7 días, `BIWEEKLY` +14 días, `MONTHLY` +1 mes calendario y `QUARTERLY` +3 meses calendario. En `MONTHLY`/`QUARTERLY`, cada fecha se calcula desde `StartDate` y el índice, conservando el día ancla o usando el último día disponible del mes sin cambiar el ancla siguiente; incluye años bisiestos y sucede antes de convertir a UTC. `ONE_TIME` termina tras su ejecución única. `FREQUENCY` termina cuando la siguiente ejecución supera `End Date`.
 
 **OPEN:** zona horaria, tratamiento de horario de verano, normalización de fechas y ejecución si la fecha/hora cae en un instante inexistente o repetido.
 
@@ -206,6 +230,7 @@ Todos los componentes nuevos del diagrama son propuestas, no hallazgos de implem
 |---|---|
 | `SurveyCampaignsModule` | Agrupar administración, validación, consulta, ejecución y adaptadores propios de campañas en NestJS. |
 | `CampaignService` | Aplicar transiciones de estado, validar configuración y coordinar persistencia. No enviar correos directamente desde el controller. |
+| `CampaignCatalogProvider` | Proveedor de catálogos exclusivo de Campaign, detrás de contrato estable para Angular; permite MOCK sintético y futuro Analytics sin inventar su protocolo. |
 | `AudienceResolver` | Traducir filtros a consulta segura sobre la fuente corporativa; aplicar jerarquías, offset, deduplicación y conteos. |
 | `AudiencePreviewService` | Ejecutar preview del lado servidor con límites y sin devolver el universo completo. |
 | `CampaignScheduler` | Usar un tick global de `@nestjs/schedule` para encontrar campañas vencidas y reclamar ejecuciones. No crear un cron por campaña. |
@@ -278,7 +303,8 @@ No se verificó un mecanismo reutilizable de claim de campañas en el checkout. 
 
 | Integración | Dirección | Responsabilidad y validación pendiente |
 |---|---|---|
-| Fuente corporativa CF/Analytics | PEC lee divisiones, departamentos, compras y clientes/contactos | **OPEN:** motor/conexión autorizada, vistas/API, columnas, filtros, permisos, frescura, volumen, claves y significado de cada jerarquía. Implementar adaptador de lectura sin asumir nombres de vistas. |
+| Fuente corporativa CF/Analytics | PEC leerá catálogos y, en otra fase, audiencia | **OPEN:** no hay contrato real ni evidencia de endpoint, autenticación, campos o jerarquías. |
+| `MockCampaignCatalogProvider` | Catálogos sintéticos aislados del frontend mediante el contrato Campaign | **MOCK:** seis catálogos; IDs y labels sintéticos identificados como MOCK; relaciones para probar dependencias, no confirmadas por CF. Se activa solo con `CAMPAIGN_CATALOG_PROVIDER=mock` fuera de producción; no es fallback. |
 | Emblue Transactional Email API | PEC → Emblue | **OPEN:** autenticación, endpoint, plantilla, tamaño/rate limit, respuesta por elemento, idempotencia, límites, estados y manejo de errores. |
 | Emblue DataLab/Webhooks | Emblue → PEC | **OPEN:** eventos y campos disponibles, firma, reintentos del proveedor, orden, identificador único, política de replay y exposición de aperturas/clics/bounces. |
 | PEC Surveys | Campaign → Survey existente | Reutilizar metadatos y URL/flujo existentes. Validar disponibilidad y estado de publicación sin duplicar SurveyJS. |
@@ -288,7 +314,8 @@ No registrar secretos de integración en código ni en documentos versionados. L
 
 ## 10. Seguridad y protección de datos
 
-- Aplicar permisos de PEC al listado, edición, acciones de scheduling/suspend/resume/cancel/delete, preview y consulta de destinatarios. **OPEN:** roles y permisos concretos.
+- Aplicar autenticación PEC y CASL backend a todas las rutas Campaign, incluido selector de Surveys y catálogos. Solo `ADMIN` y `SUPERADMIN` tienen acceso multiempresa; los demás roles no acceden. No se modifican permisos de otros módulos.
+- La empresa activa PEC no limita Campaign. El endpoint específico de Campaign valida Surveys conforme a esta política sin ampliar `/surveys`.
 - Requerir autorización del backend; ocultar acciones en Angular no constituye control de acceso.
 - Usar solo identificadores y correo indispensables para resolver y enviar invitaciones. No copiar una audiencia completa a la base PEC sin justificarlo.
 - Restringir acceso a destinatarios y proteger datos persistidos con las medidas de plataforma aprobadas.
@@ -316,10 +343,10 @@ Propuesta de observabilidad:
 
 | Capa | Impacto arquitectónico propuesto | Situación actual / límite |
 |---|---|---|
-| Frontend | Completar el módulo de campañas con dashboard y cards aprobadas, listado, filtros por estado, detalle, formulario en secciones, preview acotado e historial. | Existe navegación/shell de campañas, pero no se verificó integración persistente. Mantener patrones PEC y usar API como fuente de verdad. |
-| Backend | Añadir módulo NestJS para Campaign, reglas, preview, scheduler/coordinación, eventos y adaptadores. | `SurveysModule` es existente; no se encontró módulo de campañas ni adaptador Emblue implementado. Rutas definitivas fuera de este documento. |
-| Database | Persistir configuración, ejecuciones y estado idempotente de las compras/destinatarios procesados; restricciones e índices adecuados. | Prisma/PostgreSQL existentes; no se define schema ni migración aquí. Modelo exacto depende del contrato fuente y volumen/retención. |
-| Fuente de datos | Lectura segura de catálogos y compras elegibles. | Contrato CF/Analytics no está disponible en el checkout. |
+| Frontend | Continuar administracion, segmentacion y QA; contrato de catalogos independiente del proveedor. | Dashboard/listado/detalle y formulario conectados; catalogos MOCK visibles. Preview real y scheduler quedan fuera/deferred. |
+| Backend | Evolucionar `SurveyCampaignsModule`, CASL, CRUD, selector Campaign de Surveys y provider de catalogos. | CRUD/dashboard, selector de Surveys y catalogos MOCK existen en checkout. Analytics real, Emblue, preview real y scheduler no implementados. |
+| Database | Mantener configuracion y asociaciones de selecciones en modelos Prisma Campaign existentes. | Modelos y migracion Campaign estan en checkout; validacion PostgreSQL de Sprint 2.4 pendiente. Este cambio documental no aplica migraciones. |
+| Fuente de datos | Catalogos sinteticos durante desarrollo y fuente real cuando haya contrato. | Analytics real sigue OPEN; MOCK no resuelve audiencia ni autoriza envios. |
 | Emblue | Cliente de envío y receptor/correlacionador de eventos. | Contratos de API/DataLab/Webhooks y retries OPEN. |
 | Encuesta pública | Atribución Campaign/Execution/Recipient sin exponer PII. | Flujo existente requiere revisión específica antes de decidir integración. |
 | Operación | Scheduler replicado con claim, recuperación, métricas y límites de carga. | Existe scheduler global; no se verificó claim de campañas ni configuración operativa de workers. |
@@ -362,8 +389,8 @@ Propuesta de observabilidad:
 | OPEN-05 Eventos Emblue | DataLab/Webhooks, firma, eventos, claves, orden, retries y deduplicación. | Equipo PEC/Emblue |
 | OPEN-06 Recovery/retries | Número de intentos, backoff, expiración/lease, resultados ambiguos y cuándo reabrir ejecución. | Negocio/operaciones |
 | OPEN-07 Atribución | Diseño del token, expiración, almacenamiento, consumo/reuso y cambios en public survey. | Seguridad/equipo PEC |
-| OPEN-08 Roles | Permisos existentes para administración, acciones operativas y destinatarios. | Producto/seguridad |
-| OPEN-09 Timezone/calendario | Zona horaria definitiva, DST, fin de mes, Send Time y límites de End Date. | Negocio |
+| OPEN-08 Roles | El acceso Campaign esta aprobado solo para ADMIN/SUPERADMIN efectivos; siguen pendientes los permisos especificos para recipients y operaciones no cubiertas. | Producto/seguridad |
+| OPEN-09 Timezone/calendario | Cerrado parcialmente: Ecuador usa `America/Guayaquil` como zona predeterminada y se persiste explícitamente sin inferir el navegador; End Date es inclusiva local, el slot exacto a Send Time es válido y no hay posteriores; MONTHLY/QUARTERLY usan ancla StartDate y ajuste al último día sin drift. Permanecen OPEN conversión local→UTC, DST y efectos de recovery/downtime/reanudación sobre End Date. | Negocio/arquitectura |
 | OPEN-10 Retención | Retención de destinatarios, compras procesadas, eventos y respuestas vinculadas. | Seguridad/privacidad/negocio |
 | OPEN-11 Volumen y operación | Audiencia máxima, ventana de envío, lotes, concurrencia, límites y alertas. | Negocio/operaciones/Emblue |
 | OPEN-12 Publicación de Survey | Campo y transición reales que equivalen a `PUBLISHED`; validación de `availableFrom/availableTo`. | Equipo Surveys |
@@ -372,7 +399,7 @@ Propuesta de observabilidad:
 
 Estas fases expresan secuencia arquitectónica, no tareas técnicas ni autorización de implementación.
 
-1. **Cerrar contratos y decisiones:** obtener fuente de audiencia, claves de compra, contrato Emblue, roles, timezone, recuperación y atribución. Documentar las decisiones que cambien interfaces o persistencia.
+1. **Cerrar contratos y decisiones:** obtener fuente de audiencia, claves de compra, contrato Emblue, roles, reglas temporales pendientes (conversión local→UTC, DST y recovery) y atribución. La zona predeterminada Ecuador, End Date inclusiva y regla MONTHLY/QUARTERLY están decididas; documentar las decisiones que cambien interfaces o persistencia.
 2. **Definir modelo y API:** diseñar entidades/restricciones, transiciones, contratos de preview y administración, outcomes e idempotencia. Revisar límites de datos y migraciones antes de implementarlos.
 3. **Completar administración UI/API:** crear/listar/editar campañas, estados y detalle con valores persistidos; preservar SurveyJS y disponibilidad de la encuesta.
 4. **Resolver segmentación y preview:** integrar fuente corporativa de solo lectura, filtros jerárquicos, offset, conteos y muestra limitada; verificar no exponer audiencia completa.
@@ -398,13 +425,18 @@ Estas fases expresan secuencia arquitectónica, no tareas técnicas ni autorizac
 ## 18. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.2
+- **Version:** 0.4
 - **Validación técnica:** Se inspeccionó la estructura actual del checkout para identificar módulos de encuestas, Prisma/PostgreSQL, Angular y `@nestjs/schedule`.
 - **Pendiente:** Validar contratos externos, decisiones OPEN y encaje final con los responsables de PEC, Analytics, Emblue, seguridad y operación.
-- **Artefactos deliberadamente no generados:** schema Prisma definitivo, endpoints definitivos, tasks, código y migraciones.
+- **Aprobación formal:** pendiente; esta actualización no cambia DRAFT.
+- **Validación PostgreSQL:** Sprint 2.4 pendiente.
 
 ## 19. Historial de cambios
 
 | Versión | Fecha | Cambios |
 |---|---|---|
 | 0.2 | 2026-10-18 | Se establece `CampaignRecipient` como obligatorio a nivel de dominio con consulta de resultados por Execution; se neutraliza la forma de solicitud transaccional a Emblue y se deja OPEN si es individual o batch; se expresa el claim por Campaign + ejecución programada (`campaignId + scheduledAt / executionKey`); se aclara que watermark/lookback son optimizaciones evaluables y no requisitos funcionales, y que una falla total no marca audiencia pendiente como procesada; se agregan Search por `Campaign Name`/`Survey Name` y Filter por `Status` al Dashboard, conservando cards y columnas. |
+| 0.3 | 2026-10-20 | Se incorporan decisiones multiempresa y roles, separación Enterprise/Company, catálogos MOCK sintéticos reemplazables y sus límites, estado OPEN de publicación y validación PostgreSQL pendiente. El documento permanece DRAFT. |
+| 0.4 | 2026-10-20 | Se establece español obligatorio en UI, etiquetas centralizadas, preservación de valores técnicos, fechas y paginación localizadas. Estado DRAFT conservado. |
+| 0.4 | 2026-10-21 | Formaliza zona predeterminada `America/Guayaquil` y End Date inclusiva local; delimita los OPEN temporales restantes sin cambiar el estado DRAFT. |
+| 0.4 | 2026-10-21 | Registra la política aprobada de ancla StartDate y ajuste MONTHLY/QUARTERLY al último día disponible sin drift acumulativo, también en año bisiesto. Estado DRAFT conservado. |
