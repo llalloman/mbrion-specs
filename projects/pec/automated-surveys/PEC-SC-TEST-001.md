@@ -7,7 +7,7 @@
 | Documento | PEC-SC-TEST-001 |
 | Título | Estrategia de Pruebas - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos de tests en inglés |
 
@@ -163,13 +163,15 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 |---|---|---|---|---|---|
 | TST-CF-01 | Contract + Integration | Request de audiencia contra contrato firmado de CF; incluir multiselect, jerarquía, offset, paginación, `evaluationDate` y `eligibilityCutoffAt`. | Campos/semántica de filtros coinciden; elegibilidad sigue `PurchaseDate + PostPurchaseOffset <= evaluationDate`. El timestamp técnico y fecha de negocio se congelan en snapshot al iniciar resolución y se reutilizan entre páginas/recovery. | P0 | Contract test aprobado y DB/snapshot inspeccionado en varias páginas/reinicio. Timezone/conversiones y contrato CF OPEN. |
 | TST-CF-02 | Failure/Recovery + Contract | CF timeout, 5xx, auth error, rate limit, esquema inválido, página repetida o incompleta. | Clasificación diferenciada; fallo total no equivale a audiencia vacía ni marca compras pendientes procesadas. Lectura incompleta no se declara automáticamente `COMPLETED_WITH_ERRORS`; aplica política de completitud cuando se apruebe. | P0 | Fault fixture, Execution/preview outcome, ledger sin marcado indebido, retry metrics y logs sanitizados. Completitud/paginación OPEN. |
-| TST-EMB-01 | Contract + Integration | Enviar a Emblue Transactional API con `surveyUrl` requerida y variables opcionales permitidas. | Payload conforme al contrato aprobado y al template; `purchaseId/transactionId` no se entrega como variable visible por defecto. | P0 | Contract test + sandbox no productivo con dirección sintética. Endpoint/schema aún OPEN. |
-| TST-EMB-02 | Failure/Recovery + Contract | Rechazo total/individual, credencial inválida, timeout antes/después del dispatch y rate limit. | Diferencia errores permanentes/transitorios/ambiguos; política de retry e idempotencia no produce duplicados. | P0 | Resultado por recipient, provider ref y prueba contra sandbox/documentación. Cuotas/semántica OPEN. |
+| TST-EMB-01 | Contract + Integration | Enviar a Emblue Transactional API con `surveyUrl` requerida y variables opcionales permitidas. | Payload conforme al contrato aprobado y al template; `purchaseId/transactionId` no se entrega como variable visible por defecto. | P0 | Endpoint/request/response individual v2.3 están confirmados parcialmente. Template, variables y flujo completo siguen OPEN; requiere sandbox no productivo para integración. |
+| TST-EMB-02 | Failure/Recovery + Contract | Rechazo total/individual, credencial inválida, timeout antes/después del dispatch y rate limit. | Diferencia errores permanentes/transitorios/ambiguos; política de retry e idempotencia no produce duplicados. | P0 | 21 pruebas unitarias mock cubren los casos clasificados por `EmblueService`; semántica contractual, provider ref persistida e idempotencia siguen OPEN. |
 | TST-EMB-03 | Contract + Integration | Respuesta aceptada de Emblue seguida de eventos de entrega/opens/clicks/bounces disponibles. | No confunde request aceptada con delivered; mapea solamente estados/eventos documentados y no inventa métricas. | P1 | Fixtures provider-approved y reconciliación recipient/event. |
+| TST-EMB-04 | Unit | `EmblueService.sendEmail()` con `HttpService` mock: body v2.3 confirmado y respuesta `activityId`; errores 401/403/429/5xx, timeout, red, response inesperado y validación local. | Usa `POST /emails/send`; outcome ambiguo no reintenta; logs no exponen credenciales, destinatario, HTML ni response. | P0 | Ejecutado en pec-api: 21 pruebas unitarias aprobadas; no realiza tráfico externo. |
+| TST-EMB-05 | Manual Integration | Script local NestJS, contexto mínimo `ConfigModule` + `EmblueModule`, dirección autorizada, confirmación explícita y una llamada. | Sin `AppModule`, DB/Prisma, Neon, scheduler ni reintento; resultado limita salida a status, httpStatus y activityId. | P0 | Ejecutado manualmente por el usuario: una llamada devolvió HTTP 200 y `activityId`; no acredita entrega final. Destinatario no registrado. |
 | TST-WEB-01 | Contract + Security + Integration | Webhook válido, inválido, firma incorrecta, replay, evento duplicado y evento fuera de orden. | Autenticidad antes de efecto; evento deduplicado/idempotente; transiciones válidas; replay rechazado según mecanismo aprobado. | P0 | Contrato/fixture, respuesta HTTP, event ledger y logs sin payload sensible. Schema/firma OPEN. |
 | TST-WEB-02 | Failure/Recovery + Integration | Webhook llega antes/después del cierre, falla persistencia o no se encuentra correlación. | No corrompe Execution terminal ni atribuye a destinatario incorrecto; se registra como evento y no cambia automáticamente el resultado operativo de `CampaignRecipientAttempt`. | P1 | Eventos sintéticos con orden controlado; comparación del estado Attempt y registro Event antes/después. Contrato y regla de reconciliación OPEN. |
 
-Hasta que contratos CF/Emblue/Webhook estén disponibles, no se declara aprobado el bloque Contract. Es válido desarrollar mocks de adapter para pruebas internas, pero no publicar su resultado como compatibilidad externa demostrada.
+El contrato de envío individual emBlue API v2.3 está confirmado parcialmente con evidencia aportada: endpoint, request y response `activityId`. `TST-EMB-04` valida el adapter con mocks; no demuestra compatibilidad integral del proveedor ni se considera prueba Contract completa. La consulta de actividad, idempotencia persistida, procesamiento, entrega y webhook siguen OPEN. No ejecutar el test manual sin autorización explícita.
 
 ## 10. Matriz — Security, PII y response correlation
 
@@ -252,6 +254,23 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 12. Suites existentes y nuevas, build relevante, CI y Quality Gate pasan. El reporte separa unit, integration, E2E, contract, security y concurrency; una suite mock no se reporta como prueba de DB/proveedor real.
 13. Ningún fallo P0/P1 aplicable queda aceptado sin disposición escrita; Contract/Failure tests externos bloqueados hasta contratos aprobados; tests son reproducibles, aislados, sin credenciales ni PII reales; documentación de OPENs y ambiente coincide con el commit evaluado.
 
+## 12.1 Pruebas nuevas requeridas por Sprint 2.9.1
+
+Estas pruebas son requisitos para el sprint de implementación; no se ejecutaron en esta actualización documental.
+
+| ID | Tipo | Escenario | Resultado esperado |
+|---|---|---|---|
+| TST-REC-01 | Unit + Integration | Slots vencidos de varios ciclos, catch-up dentro de 30 días. | Una sola recovery por Campaign, snapshot identifica rango/slots cubiertos; no se reproduce envío por cada slot. |
+| TST-REC-02 | Boundary + Integration | Antigüedad del backlog justo bajo/en/sobre 30 días (incluyendo valor configurable). | Dentro del límite se recupera consolidado; sobre el límite no se descarta ni avanza el trabajo y se emite alerta/intervención. |
+| TST-REC-03 | Integration | Resume antes y después de EndDate inclusiva. | Antes: recovery consolidada y próximo slot futuro. Después: no slot ordinario nuevo, solo recovery de slots originales válidos; completa cuando no quede trabajo operativo. |
+| TST-REC-04 | Concurrency | Dos workers reclaman mismo Campaign/slot a la vez. | Una Execution/claim; unicidad y claim atómico prevalecen. |
+| TST-REC-05 | Failure/Recovery | Lease expira y worker anterior intenta dispatch/escritura tras adquirir otro worker. | Fencing/CAS rechaza worker rezagado; el progreso ya persistido no se duplica. |
+| TST-REC-06 | Integration | Suspend concurrente con claim y con batch ya iniciado. | No comienza claim/batch posterior a Suspend; el batch iniciado se drena y persiste. |
+| TST-REC-07 | Unit + Integration | Retry de transitorios confirmados, permanentes y ambiguos. | Máximo 3 retries automáticos además del inicial, backoff exponencial+jitter, nueva Execution relacionada solo con elegibles; permanente/ambiguo sin retry automático. |
+| TST-REC-08 | Failure/Recovery | Timeout después de dispatch sin respuesta concluyente. | Estado ambiguous conservado; no resend automático hasta reconciliación/idempotencia documental. |
+| TST-REC-09 | Integration | Campaign llega a fin de calendario con Execution/recipient pendiente, processing o recuperable. | No pasa COMPLETED hasta resolver el trabajo; terminales inmutables. `lastExecutionAt` usa `finishedAt` de la última terminal incluyendo FAILED. |
+| TST-REC-10 | Contract | Respuesta API aceptada, proceso asíncrono y evento de entrega simulados separadamente. | No se confunden aceptación, procesamiento y entrega efectiva; no se asume que emBlue soporta idempotencia. |
+
 ## 13. OPENs de prueba
 
 | ID | Pendiente | Efecto en QA |
@@ -260,20 +279,26 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 | OPEN-TEST-02 | `test:integration` Angular apunta a proyecto/target no encontrado en `angular.json`. | Corregir o retirar script como trabajo separado cuando se apruebe; no asumir que corre hoy. |
 | OPEN-TEST-03 | Ambiente PostgreSQL aislado para integración Campaign, cadena de migraciones y fixtures no destructivos. | Sprint 2.4 PostgreSQL continúa pendiente. No ejecutar TRUNCATE/DROP ni modificar filas existentes; usar rama/base aislada antes de probar. |
 | OPEN-TEST-04 | Contrato real, ambiente sandbox y datos sintéticos de CF/Analytics. | Contract/source integration queda pendiente. |
-| OPEN-TEST-05 | Contrato real, credenciales no productivas, templates y sandbox de Emblue. | Contract/send/webhook tests no se certifican sin esta dependencia. |
+| OPEN-TEST-05 | Credenciales no productivas, templates, sandbox y contratos externos restantes de Emblue; la llamada de envío individual v2.3 está confirmada parcialmente. | El adapter tiene pruebas unitarias mock; contract/send real, webhook y reconciliación no se certifican sin estas dependencias. |
 | OPEN-TEST-06 | Permisos específicos de recipients/operaciones; el acceso Campaign básico está aprobado solo para ADMIN/SUPERADMIN efectivos y alcance multiempresa. | Probar rol efectivo, denegación a otros roles, independencia de empresa activa y no regresión de otros módulos. |
-| OPEN-TEST-07 | Estado técnico `PUBLISHED`; conversión local→UTC (defecto identificado), DST y reglas para otras zonas, catch-up, recuperación/downtime y finalización al reanudar. | Mantener bloqueado Schedule/Resume; no inferir `PUBLISHED` de `Survey.status = 1`. La regla month-end/ancla queda cubierta por TST-CAL-04/05 y ya no es OPEN. |
-| OPEN-TEST-08 | Retry, resultado ambiguo, reconciliación/idempotencia Emblue, firma/replay/event ID de webhook y reglas de completitud de lectura/fallo parcial. | Bloque failure/recovery y contract permanece bloqueado hasta definir semántica y contratos; `FAILED` terminal no se reabre. |
+| OPEN-TEST-07 | Estado técnico `PUBLISHED`; conversión local→UTC/DST y reglas para otras zonas. | Mantener Schedule/Resume bloqueados; no inferir `PUBLISHED` de `Survey.status = 1`. Catch-up, downtime, Suspend/Resume, EndDate y finalización v1 quedan cerrados por políticas 2.9.1. |
+| OPEN-TEST-08 | Reconciliación/idempotencia Emblue, firma/replay/event ID de webhook, códigos para clasificar errores, y reglas de completitud de lectura/fallo parcial. | Probar no-resend ante ambiguity; contrato/reconciliación externos quedan bloqueados. `FAILED` terminal no se reabre. |
 | OPEN-TEST-09 | Umbral CI de coverage y calidad, métricas de contract tests y Quality Gate PEC aplicable. | DoD requiere usar Quality Gate vigente sin inventar porcentaje nuevo. |
-| OPEN-TEST-10 | Algoritmo definitivo de `executionKey`, modelo físico de `recoveryOfExecutionId` o equivalente y política de recuperación de reservations/Attempts. | Las pruebas verifican invariantes ya acordadas, pero el contrato físico y el flujo de retry requieren decisión; no autorizar resend ambiguo. |
+| OPEN-TEST-10 | Validación PostgreSQL aislada de `executionKey`, `claimGeneration`, recuperación de reservas/Attempts y constraints nuevas. `nextRetryAt` no se requiere: retry queda en `CampaignExecution.scheduledAt`. | Las pruebas unitarias mock verifican CAS/fencing y selección de retry; falta confirmar concurrencia, unique index y transacciones en PostgreSQL local aislado, sin limpiar datos existentes. |
 | OPEN-TEST-11 | Token de ResponseCorrelation: emisión, expiración, revocación, reutilización y cardinalidad de respuestas. | Probar casos válidos/negativos en cuanto el mecanismo se apruebe; no inventar reglas de reuso. |
 
 ## 14. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.4
-- **Tests escritos/ejecutados:** ninguno; este documento define estrategia solamente.
-- **Pendiente:** ejecutar suites de catálogos/scope y validación PostgreSQL aislada. Contratos externos, publicación Survey, calendario, runner y recuperación siguen OPEN. Esta actualización no ejecuta pruebas.
+- **Version:** 0.5
+- **Tests escritos/ejecutados:** 21 pruebas unitarias mock de `EmblueService.sendEmail()` aprobadas y una ejecución manual NestJS reportada con HTTP 200/`activityId`; esta evidencia confirma aceptación API para una llamada, no procesamiento o entrega final.
+- **Pendiente:** ejecutar suites de catálogos/scope y validación PostgreSQL aislada. `/activities/find`, idempotencia persistida, publicación Survey, calendario, scheduler y recuperación operativa siguen OPEN. Esta actualización documental no ejecuta pruebas.
+
+### Actualización Sprint 3.1A — pruebas del control de ejecuciones
+
+`campaign-execution.service.spec.ts` ejecuta 13 pruebas unitarias con mocks: creación idempotente, contienda de dos workers simulada mediante CAS, lease vencido, fencing inválido/worker rezagado, ordinal interno duplicado, renovación/liberación de lease, slots de recovery preservados, marcador `DISPATCHING`, aceptación con `activityId` sin inferir `SENT`, inmutabilidad terminal y retry selectivo que excluye accepted/ambiguous.
+
+Resultado local: 13/13 pruebas focalizadas y 84 pruebas de Campaign aprobadas; build NestJS y `prisma validate` aprobados. La prueba de dos workers es un mock, no demuestra serialización real de PostgreSQL. No había `CAMPAIGN_TEST_DATABASE_URL`; no se ejecutó integración PostgreSQL, no se aplicó la migración y no se usó Neon. Generación Prisma quedó bloqueada por `EPERM` del motor Windows.
 
 ## 15. Historial de cambios
 
@@ -285,3 +310,66 @@ La estrategia se considera satisfecha para una versión candidata cuando:
 | 0.4 | 2026-10-21 | Se cierran los casos de conteo inclusivo y límites exactos de duración; se separa la validación de frecuencia de los OPENs sobre ocurrencias efectivas en EndDate. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Formaliza pruebas para `America/Guayaquil`, zona explícita sin inferencia del navegador y EndDate local inclusiva; mantiene OPEN publicación, conversión local→UTC, DST, catch-up y recuperación. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Agrega casos deterministas MONTHLY/QUARTERLY con ancla StartDate, ajuste a fin de mes, años bisiestos y ausencia de drift acumulativo; mantiene OPEN recovery/downtime. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Añade escenarios requeridos para consolidación/backlog 30 días, Suspend/Resume/EndDate, fencing multiworker, retry selectivo y separación de aceptación/procesamiento/entrega; cierra OPENs funcionales de recovery. Sin pruebas ejecutadas. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra 21 pruebas unitarias mock de `sendEmail()` y el script manual NestJS preparado, pendiente de autorización/ejecución. No confunde acceptance con entrega ni cierra `activities/find` o idempotencia. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra la ejecución manual reportada por el usuario: una solicitud NestJS aceptada HTTP 200 con `activityId`; sin destinatario ni afirmación de entrega. Estado DRAFT conservado. |
+
+### Validación Sprint 3.1A.1 — resultados comprobados (2026-10-23)
+
+`prisma validate`, `npm run build`, ESLint focalizado y 84 pruebas unitarias Campaign pasaron localmente. `prisma generate` volvió a fallar con `EPERM` al renombrar `query_engine-windows.dll.node`; no se detuvo ningún proceso. La consulta de esquema de solo lectura confirmó en la base de desarrollo los enums, columnas, default e índice de la migración. La migración no está registrada en `_prisma_migrations`. La suite PostgreSQL no se ejecutó: crea y actualiza empresas, usuarios, encuestas y campañas sin limpieza posterior; no hay `CAMPAIGN_TEST_DATABASE_URL` y no se autorizó escribir en la base persistente. La contienda entre workers permanece verificada solo por mocks, no por PostgreSQL. Estado DRAFT conservado.
+
+El registro incompleto 20250907231907_add_user_establishment_table es metadato historico bajo Database-First; no bloquea Prisma Client ni DDL manual y no se modifico.
+
+
+### Convención Database-First y verificación (2026-10-23)
+
+Las pruebas unitarias y build no aplican DDL. Las pruebas de integración con escrituras requieren PostgreSQL aislado, preparado con SQL manual y esquema sincronizado; no ejecutan migraciones Prisma ni usan la base de desarrollo persistente. La ausencia de una fila en _prisma_migrations no afecta el Prisma Client. Después de generar el cliente, prisma validate, prisma generate, build NestJS, ESLint focalizado y 84 pruebas unitarias Campaign pasaron. La suite PostgreSQL se omitió porque crea y actualiza fixtures sin limpieza y no existe CAMPAIGN_TEST_DATABASE_URL. DRAFT conservado.
+
+### Sprint 3.1A.2 — seguridad y preparación PostgreSQL (2026-10-23)
+
+La suite `survey-campaigns.integration.spec.ts` escribe empresas, usuario, encuestas, campañas, ejecuciones, destinatarios e intentos; también actualiza una Survey sintética archivándola. No usa datos de clientes. La suite ahora asigna un `runTag` UUID a las filas sintéticas y, en `afterAll`, elimina por IDs rastreados y en orden de claves foráneas. No utiliza TRUNCATE, DROP, reset de secuencias ni limpieza global. Una terminación forzada del proceso antes de `afterAll` puede dejar fixtures identificados por `IT-CAMPAIGN-<UUID>`; por eso se exige una base descartable/local dedicada.
+
+La integración se rechaza salvo que `CAMPAIGN_TEST_DATABASE_URL` apunte a `localhost`/loopback, puerto 5432 y base `pec_campaigns_test`. Antes de crear fixtures se consulta y verifica `current_database`, `current_schema`, dirección/puerto del servidor, `current_user` y propietario de la base; se requiere esquema `public`, loopback y rol/propietario `campaign_test`. Se elimina el opt-in a Neon. Estas comprobaciones no constituyen autorización para usar una base remota ni sustituyen la revisión de la conexión local antes de ejecutar.
+
+Se prepararon escenarios PostgreSQL reales para claim concurrente con un único ganador, generación de fencing, takeover de lease expirado, rechazo de worker obsoleto, renovación, unicidad/idempotencia de executionKey, inmutabilidad terminal, progreso y activityId, retry selectivo sin ambiguos y recovery con slots originales. Estas pruebas requieren la base aislada anterior; no se ejecutaron en Sprint 3.1A.2 porque `CAMPAIGN_TEST_DATABASE_URL` no está configurada. Ninguna consulta de integración ni fixture PostgreSQL se ejecutó.
+
+La concurrencia PostgreSQL, restricciones y transacciones permanecen pendientes de evidencia. Pruebas unitarias mock no sustituyen dichas comprobaciones. Para ejecutar la suite se requiere una instancia PostgreSQL local aislada, base propiedad del rol `campaign_test`, esquema preparado manualmente conforme al SQL Database-First vigente, URL temporal de pruebas y credenciales sin privilegios sobre otras bases. El runner de integración no aplica DDL.
+
+Validación de despliegue Database-First: el entrypoint conserva una ruta condicional que llama `prisma migrate deploy` cuando `RUN_MIGRATIONS=true`; el chart Helm inspeccionado no establece esa variable. Se recomienda eliminar/bloquear esa ruta en una actualización posterior autorizada o hacer que `RUN_MIGRATIONS=true` termine el arranque con error explícito; no se modificó el despliegue en este sprint.
+
+## Historial de cambios
+
+| Versión | Fecha | Cambios |
+|---|---|---|
+| 0.5 | 2026-10-23 | Documenta el guard conservador para PostgreSQL local, fixtures UUID con limpieza acotada, escenarios de concurrencia preparados y resultados pendientes al no existir URL de pruebas. Registra el riesgo condicional de `RUN_MIGRATIONS=true`; estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra 15/15 pruebas PostgreSQL, 108/108 pruebas Campaign, build/lint y correcciones del guard, fixtures e idempotencia concurrente; conserva DRAFT. |
+
+Aclaración del árbol actual: `prisma/migrations/20261018000000_add_automated_survey_campaigns/migration.sql` sigue existiendo en el checkout. El DDL adicional de controles está en `prisma/manual-sql/campaign_execution_controls.sql`, pero eso no elimina la migración inicial de Campaign ni el resto del historial. Si `RUN_MIGRATIONS=true`, Prisma podría intentar aplicar cualquier migración pendiente de esa cadena contra la base configurada. El riesgo refuerza la recomendación de bloquear la ruta automática bajo Database-First; no se cambió ni movió este archivo.
+
+### Sprint 3.1A.3 — disponibilidad de PostgreSQL y regresión general (2026-10-23)
+
+Comprobación de solo lectura del equipo: Docker Desktop está instalado (CLI 29.8.0), pero el servicio `com.docker.service` figura `Stopped` y el cliente no puede conectarse al engine (`docker version`/`docker ps`: acceso denegado al named pipe). No hay proceso/servicio PostgreSQL ni comandos `psql`/`postgres` disponibles. El puerto local 5432 no tiene listener y la conexión a `127.0.0.1:5432` falla. `CAMPAIGN_TEST_DATABASE_URL` no está configurada. Por tanto, no se pudo verificar identidad, propietario ni esquema; no se crearon recursos ni se ejecutó DDL/DML. Las 15 pruebas PostgreSQL continúan sin evidencia real.
+
+No debe iniciarse el `docker-compose.yml` del proyecto para esta validación: inicia también la API, lee `.env`, declara `restart: always`, conserva un volumen `db` y publica PostgreSQL en 5435. Se requiere autorización para iniciar Docker Desktop y provisionar una instancia de pruebas separada, solo enlazada a loopback, con base `pec_campaigns_test`, propietario `campaign_test` y almacenamiento propio. No existe hoy un SQL bootstrap completo aprobado para una base vacía: `campaign_execution_controls.sql` es incremental y la migración Campaign inicial depende de tablas PEC existentes. Antes de probar se debe preparar/revisar el esquema de test completo; no cargar datos de Neon ni usar el compose actual.
+
+Regresión Jest ejecutada con la suite PostgreSQL excluida: 95 suites, 72 aprobadas, 23 fallidas; 1.124 pruebas, 1.063 aprobadas y 61 fallidas. Agrupación observada: 9 suites no llegaron a ejecutar pruebas por errores de compilación TypeScript o resolución de módulos; 20 pruebas fallaron por providers Nest no registrados en módulos de test; las otras 41 fallaron por expectativas/mocks, fixtures, resultados y un caso de timeout en suites de Complaints, Product, Reports, Metrics, Surveys reports, Country, Configs, Auth, Keycloak y Notifications. Los errores de compilación incluyen fixtures `codCollaborator`/DTO incompatibles, propiedades esperadas ausentes, helper con aridad distinta y resolución de `roles.constants`.
+
+No falló una suite específica de Campaign en esa corrida; los tests Campaign focalizados pasaron 90/90 en 8 suites, build NestJS pasó y ESLint focalizado pasó. Esto no demuestra causalidad ni permite etiquetar los 61 fallos como preexistentes: falta una comparación reproducible con el commit base previo a los cambios Campaign. No se modificaron módulos ajenos.
+
+La revisión de `docker-entrypoint.sh` confirma que `RUN_MIGRATIONS=true` activa `prisma migrate deploy`; el chart inspeccionado no define esa variable, pero overrides externos podrían hacerlo. Además, `20261018000000_add_automated_survey_campaigns/migration.sql` permanece en `prisma/migrations`; Prisma podría procesar migraciones pendientes de toda la cadena. Recomendación Database-First: eliminar la rama de deploy automático o hacer fail-closed al detectar `RUN_MIGRATIONS=true`, mantener `prisma generate` separado y añadir una comprobación CI de chart/overrides. No se modificó el despliegue.
+
+Dictamen: Sprint 3.1A no se cierra todavía. Falta ejecutar las pruebas reales contra PostgreSQL local aislado y obtener resultado concurrente. Los SPECS continúan versión 0.5 / DRAFT.
+
+### Sprint 3.1A.3 — validación PostgreSQL aislada (2026-10-23)
+
+Esta evidencia sustituye el bloqueo operativo descrito en la nota Sprint 3.1A.3 anterior. Se utilizó el contenedor dedicado `pec-campaign-test-db-sprint313`, imagen PostgreSQL 15.4 Alpine, publicado solo en `127.0.0.1:5432`, sin volumen persistente ni datos reales. La base `pec_campaigns_test`, esquema `public` y rol/propietario `campaign_test` se verificaron antes de los fixtures. No se utilizó Neon ni Prisma Migrate.
+
+El esquema de prueba se preparó aplicando al contenedor recién creado SQL DDL generado desde el `schema.prisma` actual (178 sentencias estructurales; sin DML, DROP ni TRUNCATE). Se verificaron las diez tablas físicas `sspectcampaign*`, tipos y restricciones requeridos, incluidos `claim_generation DEFAULT 0 NOT NULL` y el índice único de `attempt_key`.
+
+La suite de integración PostgreSQL ejecutó sus 15 pruebas: 15 aprobadas. Cubrió restricciones FK/UNIQUE, relaciones Campaign/Survey entre empresas, dos workers con un solo claim, incremento de fencing, takeover de lease expirado, rechazo de worker obsoleto, renovación, repetición concurrente de `executionKey`, inmutabilidad terminal, progreso/`activityId`, retry solo para fallo transitorio confirmado y recovery con slots originales. Tras la suite, consultas de solo lectura confirmaron cero filas en Campaign, Execution, Recipient, Attempt y ResponseCorrelation, y ausencia de fixtures sintéticos en Country, Enterprise, User y Survey.
+
+La validación encontró y corrigió tres defectos limitados a Campaign: el guard rechazaba la IP privada reportada por PostgreSQL dentro de Docker aunque la URL del cliente fuera loopback; los fixtures omitían campos y la relación Country obligatorios por el schema; y dos `upsert` simultáneos con la misma clave podían devolver `P2002` en lugar de la fila ganadora. Se agregó cobertura unitaria para el guard y para la carrera de unicidad; el caso de fencing ahora utiliza un Recipient sintético válido.
+
+Validación posterior: 9 suites Campaign, 108 pruebas aprobadas (incluye las 15 PostgreSQL); `npm run build` aprobado; ESLint focalizado aprobado. La suite general, excluyendo la integración ejecutada separadamente, reportó 95 suites (72 aprobadas, 23 fallidas) y 1.127 pruebas (1.066 aprobadas, 61 fallidas). Los fallos se ubican en suites ajenas a Campaign: errores de compilación/resolución, dependencias no provistas y aserciones en Complaints, Product, Reports, Metrics, Surveys report, Country, Configs, Auth/Keycloak y Notifications. No se hizo una corrida comparable del commit base; no se atribuyen como preexistentes ni se afirma causalidad de Campaign.
+
+Para esta fase, la verificación de PostgreSQL aislado y concurrencia queda satisfecha. Permanecen fuera de alcance y OPEN los flujos de scheduler, envío automático, `/activities/find`, idempotencia externa de emBlue, entrega final, publicación real de Survey y la protección de despliegue `RUN_MIGRATIONS=true`. SPECS conservan v0.5 / DRAFT.

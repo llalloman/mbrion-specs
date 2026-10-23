@@ -7,7 +7,7 @@
 | Documento | PEC-SC-SCHED-001 |
 | Título | Diseño de Scheduling y Ejecución - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos en inglés |
 
@@ -102,7 +102,7 @@ En recuperación tras downtime, `scheduledAt` original y valores efectivos de ev
 3. Si está vencida y Campaign está `SCHEDULED` (o en estado elegible según transición aprobada), se genera una unidad de trabajo idempotente.
 4. Tras resultado final, Campaign no vuelve a programarse; la siguiente ejecución es nula y la campaña pasa al estado final funcional aprobado. Baseline establece `COMPLETED` para el fin de una campaña, pero las reglas de estados para falla total/una vez requieren confirmar la transición.
 
-Una Execution `FAILED` es terminal e inmutable y no cuenta como audiencia procesada exitosamente. Si quedan compras o trabajo pendientes de recuperación, Campaign no debe cerrarse como `COMPLETED` mientras la política de recuperación siga sin resolver. La transición de Campaign tras fallo total permanece **OPEN**, especialmente para `ONE_TIME`; un retry no reabre la Execution fallida.
+Una Execution `FAILED` es terminal e inmutable y no cuenta como audiencia procesada exitosamente. Campaign no se cierra como `COMPLETED` mientras exista trabajo pendiente, en curso o recuperable. Retry crea una nueva Execution relacionada y no reabre la fallida.
 
 ### 4.2 `FREQUENCY`
 
@@ -237,7 +237,7 @@ Una suspensión/cancelación que ocurre mientras Execution ya está `PROCESSING`
 | `COMPLETED_WITH_ERRORS` | Procesamiento concluyó y conserva resultados individuales, con fallos parciales. |
 | `FAILED` | Falla total que impide completar la Execution; detalle sanitizado. Es terminal, inmutable y no representa procesamiento exitoso de la audiencia. |
 
-Transición normal: `PENDING → PROCESSING → terminal`. Los estados terminales no se regresan a PROCESSING ni se sobrescriben. Una recuperación de worker con Execution aún `PROCESSING` puede reasumir el claim vencido sobre esa misma Execution si el progreso es durable y continuar es seguro. Una Execution terminal `FAILED` no se reabre. Si se requiere una nueva Execution para retry posterior, lleva nueva `executionKey` y relación explícita `recoveryOfExecutionId` o equivalente, sin mutar la anterior. La política exacta de retry permanece OPEN.
+Transición normal: `PENDING → PROCESSING → terminal`. Los estados terminales no se regresan a PROCESSING ni se sobrescriben. Una recuperación de worker con Execution aún `PROCESSING` puede reasumir el claim vencido sobre esa misma Execution únicamente tras verificar progreso durable y fencing vigente. Una Execution terminal no se reabre; retry de recipients elegibles crea nueva Execution con nueva `executionKey` y `recoveryOfExecutionId` o equivalente.
 
 ### 7.3 Creación idempotente
 
@@ -315,7 +315,7 @@ Así se consolida cantidad de ciclos, pero puede cambiar el número/calendario d
 
 No ejecutar un bucle que envíe una campaña atrasada repetidamente hasta que `nextExecutionAt > now`. No materializar todas las ocurrencias vencidas como mensajes separados sin decisión de negocio. Si existe ventana máxima de recuperación o backlog demasiado antiguo, pausar/alertar y requerir intervención en vez de crear una ráfaga.
 
-**OPEN:** duración máxima del downtime recuperable, retención de datos fuente, regla para campañas cuyo EndDate ya expiró mientras PEC estaba caído, y si se omite o consolida ejecución al reanudar campaña suspendida.
+**OPEN:** retención de datos fuente y procedimiento operativo para desbloquear backlog mayor a 30 días. La consolidación, límite inicial configurable de 30 días, comportamiento al superar el límite y regla post-EndDate están APPROVED en §17.1.
 
 ## 10. Fallos, estado final y retry separation
 
@@ -579,25 +579,61 @@ Alertar por executions atascadas, lease expirado recurrente, crecimiento de back
 | EndDate pasó durante downtime | Respetar ocurrencias válidas hasta el límite local inclusivo si esa representación se confirma; timezone, conversión y recuperación tras expiración OPEN; no fabricar múltiples ejecuciones. |
 | Métricas/logs revelan PII | Agregación, sanitización, allowlist de campos y acceso/retención limitados. |
 
+## 16.1 Cierre de políticas v1 de scheduler y recovery (APPROVED)
+
+Esta sección sustituye los OPEN operativos anteriores que contradigan estas reglas. No habilita Schedule/Resume ni activa un scheduler.
+
+### Máquina de estados
+
+| Entidad | Transición/regla |
+|---|---|
+| Campaign | `DRAFT → SCHEDULED` al Schedule válido; `SCHEDULED/ACTIVE → SUSPENDED` al Suspend; `SUSPENDED → SCHEDULED` antes de primera Execution o `ACTIVE` si ya hubo procesamiento al Resume; calendario vencido no crea slots nuevos. `COMPLETED` solo al terminar calendario y quedar sin trabajo pendiente/en curso/recuperable. `CANCELLED` y `COMPLETED` terminales según reglas vigentes. |
+| Execution | `PENDING → PROCESSING → COMPLETED / COMPLETED_WITH_ERRORS / FAILED`. Una PROCESSING con lease expirado solo se retoma con progreso durable y fencing vigente. Las tres terminales son inmutables. Fallo terminal recuperable genera una Execution nueva relacionada. |
+| Recipient / Attempt | Un Recipient conserva identidad única Campaign + Purchase. Los retries usan nuevos Attempts asociados a nueva Execution y solo incluyen recipients elegibles. No se reenvía automáticamente un resultado ambiguo. |
+
+### Slots, recovery y avance de calendario
+
+1. Normalizar cada slot local aprobado (incluyendo timezone persistida, EndDate inclusiva y regla month-end ya aprobada) a un instante UTC determinista. `nextExecutionAt` es el próximo slot ordinario no procesado y válido, no un puntero para eliminar backlog.
+2. En tick o Resume, adquirir claim antes de iniciar trabajo. Slots vencidos elegibles se condensan en una única Execution `recovery=true` por Campaign, con primer/último slot, `slotKeys` cubiertos y snapshot inmutable. No crear una Execution ni enviar por cada slot omitido.
+3. Backlog máximo automático inicial: 30 días, configurable. Si el slot elegible más antiguo excede la ventana, no dispatch ni avance como procesado; emitir alerta y requerir intervención. No descartar los slots ni compras fuente.
+4. Recovery procesa la audiencia pendiente una vez para el rango congelado, con deduplicación Campaign + purchase. Si concluye de forma válida, avanzar `nextExecutionAt` al primer slot ordinario futuro válido, nunca posterior a EndDate. Si falla, terminal FAILED inmutable, preservar pendientes y crear retry separado solo conforme a política.
+5. Resume antes de EndDate evalúa una recovery consolidada cuando haya slots vencidos y calcula el siguiente slot futuro. Después de EndDate omite nuevos slots ordinarios, pero permite recovery de trabajo perteneciente a slots originalmente válidos. Cuando no exista calendario futuro ni trabajo pendiente/en curso/recuperable, Campaign puede pasar a COMPLETED.
+6. `lastExecutionAt` se actualiza con `finishedAt` de la Execution terminal más reciente, también en FAILED. No representa inicio, aceptación del proveedor ni solo el último éxito.
+
+### Identidad, claims y concurrencia
+
+- Formatos propuestos deterministas/versionados: slot ordinario `v1:slot:<scheduledAtUtc>`; recovery `v1:recovery:<firstSlotUtc>:<lastSlotUtc>`; retry `v1:retry:<sourceExecutionId>:<retryOrdinal>`. El unique actual `(campaignId, executionKey)` evita duplicar la misma unidad; snapshot conserva zona/slot local y lista de slots cubiertos.
+- Claim se realiza en transacción corta mediante bloqueo de fila o compare-and-set atómico que revalida estado, `nextExecutionAt`, lease y ausencia de claim vigente. La creación de Execution usa la clave única como segunda barrera. No sostener transacción/lock durante Analytics o Emblue.
+- Cada propietario recibe lease y generación monotónica de fencing. Antes de cada dispatch y cada escritura persistente el worker verifica owner, expiración y generación; worker atrasado que perdió fencing no puede escribir ni comenzar otro lote.
+- Suspend serializa con el claim: después de confirmar `SUSPENDED` no se aceptan claims/lotes nuevos. El batch ya iniciado se drena y persiste. Resume y tick revalidan estado bajo el mismo mecanismo para evitar carreras.
+- El mecanismo exacto (row lock/`SKIP LOCKED` vs CAS) debe validarse para Prisma/PostgreSQL y con prueba concurrente. En Sprint 3.1A se agregó localmente `claimGeneration` y se implementó CAS en el servicio; la carrera todavía no se verificó contra PostgreSQL.
+
+### Reintentos y emBlue
+
+- Hasta 3 intentos automáticos de retry además del envío inicial, solo para fallos transitorios confirmados, con backoff exponencial y jitter. Permanentemente rechazado y outcome ambiguo no generan retry automático.
+- Un retry es nueva Execution relacionada, nueva clave determinista y subset de recipients elegibles; terminales y outcomes previos permanecen inmutables. No marcar compra procesada al reservar ni tras fallo total.
+- Registrar por separado: request aceptada por API, procesamiento asíncrono del proveedor y entrega efectiva. Una aceptación HTTP no prueba procesamiento ni entrega. Un timeout/caída después del dispatch es ambiguous; reconciliar por consulta/identificador o idempotency key documentada antes de cualquier repetición. No asumir que emBlue ofrece idempotencia.
+- Los parámetros base/tope del backoff, jitter y clasificador concreto de error requieren política operacional/contrato confirmado. Evento de entrega solo actualiza una proyección cuando contrato y reconciliación lo permitan; no reescribe una Execution terminal.
+
 ## 17. OPENs
 
 | ID | Pendiente |
 |---|---|
-| OPEN-SCHED-01 | Mecanismo de claim: row lock/`SKIP LOCKED`, conditional update/lease o advisory lock; validar Postgres/Prisma y concurrencia. |
-| OPEN-SCHED-02 | Duración/renovación del lease, detección de stale work y propietario del worker. |
+| OPEN-SCHED-01 | Elección física entre row lock/`SKIP LOCKED` y CAS atómico, validada con versión PostgreSQL/Prisma y pruebas concurrentes. Invariante de claim atómico APPROVED. |
+| OPEN-SCHED-02 | Duración/renovación del lease, alertas y operación de stale work. Lease + fencing/protección equivalente APPROVED; valor de configuración pendiente. |
 | OPEN-SCHED-03 | Intervalo global, batch size, límites por pod/global, workers/cola y fairness. |
 | OPEN-SCHED-04 | Default Ecuador `America/Guayaquil`, persistencia explícita en Campaign y no inferencia del navegador están aprobados. Siguen OPEN otras zonas de negocio, DST, horas inexistentes/repetidas y conversión de fechas locales a instantes. |
 | OPEN-SCHED-05 | **Cerrado en Sprint 2.8.1:** `MONTHLY`/`QUARTERLY` conservan el día de `StartDate`; cuando no existe, usan el último día del mes sin cambiar el ancla. Las ocurrencias se calculan desde StartDate y el índice, incluidos años bisiestos. |
-| OPEN-SCHED-06 | Regla base de EndDate cerrada: fecha local inclusiva; el slot en EndDate a SendTime es válido y no hay slots posteriores. Siguen OPEN ejecución en curso que cruza el límite, downtime/suspensión/recovery al expirar, finalización al reanudar, timezone de otros mercados y conversión/DST. |
-| OPEN-SCHED-07 | Algoritmo definitivo de `executionKey` para slot ordinario, catch-up consolidado y retry; la unicidad por Campaign + key es requerida, retries nuevos enlazan la ejecución original. |
+| OPEN-SCHED-06 | EndDate local inclusiva y recovery post-EndDate de slots originalmente válidos APPROVED. Siguen OPEN otras zonas, DST/horas ambiguas y entrega del trabajo que cruza límite operacional. |
+| OPEN-SCHED-07 | Formato técnico exacto/versionado de keys y serialización/collation. Formatos propuestos `v1:slot`, `v1:recovery`, `v1:retry`; determinismo, unicidad Campaign+key y relación de retry APPROVED. |
 | OPEN-SCHED-08 | Si se adopta cutoff exitoso global (propuesta opcional), su persistencia/criterio ante fuente parcial, `FAILED` y `COMPLETED_WITH_ERRORS`; nunca reemplaza ledger/deduplicación Campaign + Purchase. |
-| OPEN-SCHED-09 | Catch-up: primer/último slot, ventana máxima, reanudación de suspendida y qué hacer al expirar EndDate. |
-| OPEN-SCHED-10 | Estado de Campaign tras fallo total y comportamiento de próximo slot, pausa y retry. |
-| OPEN-SCHED-11 | Lifecycle de `CampaignRecipient`/Attempt, expiración de reservas, retry de FAILED y reconciliación de resultado ambiguo Emblue; una reserva expirada no autoriza resend. |
-| OPEN-SCHED-12 | Control de pausa/cancelación mientras batches están en vuelo. |
+| OPEN-SCHED-09 | CLOSED para consolidación, ventana inicial de 30 días y Resume post-EndDate; queda OPEN la configuración operativa de alertas e intervención del backlog excedido. |
+| OPEN-SCHED-10 | Semántica de avance/cutoff ante fallo parcial de fuente y criterios para datos de audiencia incompleta. Suspend/Resume y no completar con trabajo pendiente APPROVED. |
+| OPEN-SCHED-11 | Mapeo implementable de outcomes/provider errors a transient/permanent/ambiguous; parámetros de backoff y scheduling de retry. Límites, nueva Execution relacionada, retry selectivo y no retry ambiguo/permanente APPROVED. |
+| OPEN-SCHED-12 | CLOSED para Suspend: no claims/lotes nuevos y drenaje del batch iniciado. Cancel con batches en vuelo sigue OPEN. |
 | OPEN-SCHED-13 | Paginación estable, consistencia y límite de lectura de CF/Analytics. |
 | OPEN-SCHED-14 | Tamaño de lotes, límites, idempotencia, latencia y estado por destinatario de Emblue. |
-| OPEN-SCHED-15 | Significado de `lastExecutionAt` y si avanza en recuperación, partial errors o solo resultado final. |
+| OPEN-SCHED-15 | CLOSED: `lastExecutionAt = finishedAt` de la última Execution terminal, incluso FAILED. |
 | OPEN-SCHED-16 | Métricas, stack, alertas, SLOs, retención y acceso a logs/eventos. |
 
 ## 18. Criterios de cierre del diseño
@@ -627,3 +663,22 @@ La existencia de `@nestjs/schedule`, transacciones Prisma en otros flujos o un `
 | 0.4 | 2026-10-21 | Se cierra la duración inclusiva de recurrencias para validar la frecuencia permitida; el conteo usa fechas de calendario y no resuelve timezone, DST ni el límite de ocurrencia EndDate. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se aprueba timezone explícito por Campaign, default `America/Guayaquil` para Ecuador y EndDate local inclusiva, válida a SendTime y sin ocurrencias posteriores. Recovery, downtime, finalización al reanudar, DST y conversión permanecen OPEN; Schedule/Resume bloqueados por publicación y audiencia. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se aprueba la regla MONTHLY/QUARTERLY de anclaje a StartDate y ajuste al último día del mes sin desplazamiento acumulativo, también en años bisiestos; la operación se realiza sobre calendario local antes de UTC. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Cierra políticas de scheduler/recovery: ventana 30 días, consolidación, Suspend/Resume, finalización, inmutabilidad, retry selectivo, `lastExecutionAt`, keys versionadas y fencing. Contrato de Emblue y detalles operativos configurables siguen OPEN. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra adapter `sendEmail()` individual v2.3: respuesta `activityId` acredita aceptación API solamente; no reintenta resultados ambiguos ni activa scheduler. Consulta de actividad e integración persistida siguen OPEN. Estado DRAFT conservado. |
+
+### Actualización Sprint 3.0 — alcance verificado del adapter
+
+`EmblueService.sendEmail()` envía una solicitud individual por `POST /emails/send` con contrato v2.3 confirmado y devuelve `activityId` como aceptación de API. No confirma procesamiento asíncrono ni entrega. El servicio no reintenta; ante timeout, error de red, 5xx o response inesperado devuelve resultado ambiguo. No está conectado al scheduler ni persiste idempotencia/refs por Attempt. `POST /activities/find` no se usa hasta verificar su response. La prueba controlada NestJS está preparada pero no ejecutada; no habilita Schedule, Resume, scheduler o envíos de campaña. Estado DRAFT conservado.
+
+### Actualización Sprint 3.1A — estado implementado localmente
+
+`CampaignExecutionService` crea Execution ordinaria con key determinista/versionada, crea recovery con `coveredSlots` ordenados dentro del snapshot y crea retry relacionado con `recoveryOfExecutionId`. Los claims usan transacción breve, compare-and-set sobre estado/generación/lease y aumentan `claimGeneration`; la renovación, liberación y persistencia requieren owner, generación y lease vigentes. Las transiciones a estados terminales se condicionan a `PROCESSING`; no se reabre una Execution terminal.
+
+`CampaignRecipientAttempt` tiene una clave interna única separada de cualquier `idempotencyKey` externo, enum de outcome, clasificación `TRANSIENT/PERMANENT` y `providerActivityId`. Se exige persistir `DISPATCHING` antes del outcome; `ACCEPTED` conserva el activity ID y no equivale a `SENT`. El retry crea otra Execution y solo incluye el último Attempt elegible con rechazo/fallo confirmado y clasificación transitoria. Outcomes `AMBIGUOUS`, accepted y permanentes quedan excluidos.
+
+Esto es infraestructura interna: no hay rutas públicas nuevas, llamada al `EmblueService`, flujo de audiencia, scheduler, Schedule/Suspend/Resume ni envío automático. El instante retry se guarda en `CampaignExecution.scheduledAt`; no se añade `nextRetryAt`. La suite unitaria con mocks pasa, pero CAS/índices/transacciones requieren PostgreSQL aislado. La migración local no se aplicó; DRAFT se conserva.
+
+
+### Convención Database-First (2026-10-23)
+
+Las estructuras PostgreSQL que requiera scheduler/recovery deben especificarse en SQL revisable y ejecutarse manualmente. schema.prisma representa el esquema aplicado y Prisma Client se regenera con prisma generate; no se emplean comandos de migración Prisma. La migración Campaign se ejecutó manualmente en desarrollo según confirmación del usuario y el script está fuera de prisma/migrations. Las pruebas de concurrencia siguen pendientes de una base aislada. DRAFT conservado.

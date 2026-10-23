@@ -4,7 +4,7 @@
 |---|---|
 | ID | PEC-SC-FOUND-001 |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos en inglés |
 | Documento relacionado | [PEC-SC-ARCH-001.md](PEC-SC-ARCH-001.md) |
@@ -242,7 +242,7 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 - Para RB-035–RB-039, `durationDays = calendarDayDifference(endDate, startDate) + 1`: el conteo incluye `Start Date` y `End Date` y usa fechas de calendario, sin diferencias horarias, timestamps ni conversiones UTC.
 - **RB-040:** La siguiente ejecución se calcula sobre fechas locales de calendario antes de convertir a UTC: `DAILY` +1 día, `WEEKLY` +7 días, `BIWEEKLY` +14 días, `MONTHLY` +1 mes calendario y `QUARTERLY` +3 meses calendario. Para `MONTHLY` y `QUARTERLY`, cada ocurrencia se calcula desde `StartDate` y su índice, conservando el día original como ancla. Si el mes destino no contiene ese día, se usa el último día disponible; esta normalización no cambia el ancla de ocurrencias posteriores y aplica también a años bisiestos.
 - **RB-041:** `ONE_TIME` queda `COMPLETED` después de su única ejecución, según el resultado terminal registrado.
-- **RB-042:** `End Date` es inclusiva como fecha local de negocio. Una ocurrencia en `End Date` exactamente a `Send Time` es válida; no se generan ocurrencias en fechas locales posteriores. En operación ordinaria, `FREQUENCY` queda `COMPLETED` cuando ya no existe una siguiente ocurrencia dentro del período. El efecto de downtime/reanudación sobre esa finalización permanece **OPEN**.
+- **RB-042:** `End Date` es inclusiva como fecha local de negocio. Una ocurrencia en `End Date` exactamente a `Send Time` es válida; no se generan ocurrencias en fechas locales posteriores. `COMPLETED` requiere calendario terminado y ausencia de trabajo pendiente, en curso o recuperable.
 - **RB-043:** El scheduler es centralizado; no se define un scheduler individual por Campaign.
 - **RB-044 (OPEN parcial):** Para Campaigns de Ecuador, la zona predeterminada aprobada es `America/Guayaquil` y debe persistirse explícitamente antes de programar; no se infiere del navegador. Siguen OPEN la zona para otros mercados y el tratamiento de horas locales DST ambiguas o inexistentes. El anclaje y ajuste de fin de mes de RB-040 están aprobados.
 
@@ -266,7 +266,7 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 - **RB-057:** `COMPLETED` y `CANCELLED` son estados de solo lectura.
 - **RB-058:** Una Campaign con historial de ejecución no se elimina físicamente.
 - **RB-059:** Suspender o cancelar impide nuevas ejecuciones de acuerdo con la acción solicitada y conserva el historial.
-- **RB-060 (OPEN):** La disposición exacta de una ejecución que ya está `PROCESSING` al suspender/cancelar aún requiere política funcional; no se presume cancelación inmediata.
+- **RB-060:** `Suspend` bloquea nuevos claims y lotes; el lote iniciado puede finalizar y persistir. La semántica de Cancel con trabajo en curso permanece OPEN.
 
 ### 9.8 Execution lifecycle y recuperación
 
@@ -274,17 +274,17 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 - **RB-062:** Una ejecución sigue la transición `PENDING` → `PROCESSING` → estado final.
 - **RB-063:** Los estados finales de Execution son históricos e inmutables.
 - **RB-064:** Una caída del sistema no debe hacer perder las compras elegibles pendientes.
-- **RB-065:** La recuperación procesa elegibles pendientes sin generar ejecuciones atrasadas innecesarias ni una ráfaga de correos por cada intervalo perdido.
+- **RB-065:** La recuperación consolida los slots vencidos elegibles en una sola unidad por Campaign, sin reproducir un envío por slot omitido. El backlog automático inicial es 30 días, configurable; excederlo alerta y requiere intervención sin descartar datos.
 - **RB-066:** Una falla total no debe marcar compras elegibles pendientes como procesadas ni provocar que futuras ejecuciones omitan compras que todavía deben considerarse.
 - **RB-067:** Una ejecución parcial puede terminar en `COMPLETED_WITH_ERRORS` si conserva sus resultados por destinatario.
-- **RB-068 (OPEN):** Política de reintentos, espera, límites, resultados ambiguos del proveedor y definición de “fallo total” se debe acordar con Emblue y operación.
+- **RB-068:** Reintentar significa crear una nueva Execution relacionada y limitarse a recipients elegibles que no tengan resultado externo ambiguo. Solo errores transitorios confirmados admiten hasta 3 intentos automáticos de retry, con backoff exponencial y jitter, además del envío inicial. Errores permanentes y resultados ambiguos no se reintentan automáticamente. Contrato de clasificación/reconciliación Emblue permanece OPEN.
 
 ### 9.9 Recipient lifecycle
 
 - **RB-069:** Los estados de Recipient son `PENDING`, `SENT`, `FAILED` y `SKIPPED_DUPLICATE`.
 - **RB-070:** No se utiliza un estado genérico `SKIPPED`.
 - **RB-071:** El resultado debe permitir distinguir envío exitoso, fallo y duplicado sin reinterpretar el estado de entrega final de Emblue.
-- **RB-072 (OPEN):** Confirmar si `SENT` significa aceptado por la API de Emblue o entregado al buzón; eventos y confirmaciones pueden afectar el seguimiento sin cambiar el significado acordado del estado.
+- **RB-072 (OPEN parcial):** La aceptación HTTP/API, el procesamiento asíncrono de Emblue y la entrega efectiva al buzón son hechos distintos y no deben presentarse como equivalentes. La semántica exacta de `SENT`, estados/eventos disponibles y reconciliación se confirma con el contrato Emblue.
 
 ### 9.10 Emblue, invitación y Response Attribution
 
@@ -342,7 +342,7 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 - **AC-003:** Dada una configuración válida, cuando se solicita `Audience Preview`, entonces se muestran `Eligible Purchases` y `Eligible Customers` calculados con segmentación, offset y deduplicación existentes.
 - **AC-004:** Dada una segmentación con varias selecciones, cuando se evalúa, entonces las selecciones de cada filtro se combinan con OR y los filtros/grupos distintos con AND.
 - **AC-005:** Dada una Campaign con `Post-purchase Offset` cero, cuando se calcula elegibilidad, entonces no se añade espera posterior a la fecha de compra.
-- **AC-006:** Dada una Campaign `ONE_TIME` con fecha y hora válidas, cuando llega el momento programado, entonces se registra una única ejecución y, al finalizar, la campaña pasa a `COMPLETED`.
+- **AC-006:** Dada una Campaign `ONE_TIME` con fecha y hora válidas, cuando llega el momento programado, entonces se registra una única ejecución y la Campaign pasa a `COMPLETED` solo cuando la ejecución/calendario terminó y no queda trabajo pendiente, en curso o recuperable.
 - **AC-007:** Dada una Campaign `FREQUENCY` válida, cuando el usuario selecciona un rango, entonces solo se ofrecen las frecuencias correspondientes a la duración definida.
 - **AC-008:** Dada una compra elegible ya procesada por la misma Campaign, cuando se calcula una ejecución recurrente posterior, entonces no se vuelve a contar como pendiente ni se reenvía.
 - **AC-009:** Dado el mismo cliente con otra compra elegible, cuando se ejecuta la Campaign, entonces esa compra puede procesarse porque la deduplicación es por Campaign + compra.
@@ -372,10 +372,10 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 - **AC-027:** Dado un filtro opcional vacío, cuando se evalúa la audiencia, entonces ese filtro no limita los resultados.
 - **AC-028:** Dada una Campaign `FREQUENCY` cuyo próximo ciclo queda después de `End Date`, cuando finaliza su última ejecución prevista, entonces la campaña termina en `COMPLETED`.
 - **AC-029:** Dada una recurrencia `MONTHLY` o `QUARTERLY` cuyo mes destino no contiene el día original de `StartDate`, cuando se calcula la ocurrencia, entonces se usa el último día disponible del mes sin modificar el ancla original para ocurrencias posteriores, incluso en años bisiestos.
-- **AC-030:** Dado un período de indisponibilidad con varias ejecuciones omitidas, cuando el scheduler se recupera, entonces procesa compras pendientes sin producir una ráfaga de envíos atrasados innecesarios.
+- **AC-030:** Dado un período de indisponibilidad con varios slots omitidos dentro de 30 días, cuando el scheduler se recupera, entonces procesa el pendiente en una sola recovery por Campaign. Si el backlog excede la ventana configurable, alerta y requiere intervención sin descartar datos.
 - **AC-031:** Dado un fallo parcial de destinatarios, cuando se cierra la ejecución, entonces se conservan los resultados individuales y puede utilizarse `COMPLETED_WITH_ERRORS`.
-- **AC-032:** Dada una falla de la fuente corporativa o de Emblue, cuando se procesa la Campaign, entonces queda un error trazable y se conserva el historial. **OPEN:** política exacta de reintento.
-- **AC-033:** Dado que una Campaign se suspende mientras una ejecución ya está en curso, cuando se aplica la suspensión, entonces no se asume una cancelación retroactiva de los envíos ya iniciados. **OPEN:** política para el trabajo en curso.
+- **AC-032:** Dado un fallo confirmado transitorio, cuando se reintenta, entonces se crea nueva Execution relacionada, solo con recipients elegibles y hasta 3 intentos de retry automáticos además del envío inicial, con backoff exponencial+jitter; un fallo permanente o ambiguo no genera retry automático.
+- **AC-033:** Dada una Campaign que se suspende con batch en curso, cuando la suspensión queda persistida, entonces no se reclaman nuevos lotes y el batch ya iniciado finaliza/persiste de forma segura.
 - **AC-034:** Dado un destinatario sin correo válido, duplicado en la fuente o suprimido por una regla de contacto, cuando se prepara la audiencia, entonces se aplica una regla acordada y se contabiliza de forma auditable. **OPEN:** reglas de validez, supresión y conteo.
 - **AC-035:** Dado un callback repetido o fuera de orden, cuando PEC lo recibe, entonces no altera incorrectamente la correlación/resultado. **OPEN:** depende del contrato y de identificadores de evento Emblue.
 
@@ -406,7 +406,7 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 | `SUSPENDED` | Cancelar | `CANCELLED` | Conserva historial. |
 | `COMPLETED` / `CANCELLED` | Consulta | Mismo estado | Solo lectura. |
 
-**OPEN:** transición exacta al reanudar y tratamiento de la próxima fecha vencida mientras estuvo suspendida; no inferir ejecuciones atrasadas adicionales.
+`Resume` antes de EndDate evalúa recovery consolidado y calcula el siguiente slot futuro. Después de EndDate solo recupera trabajo de slots originalmente válidos y no genera slots ordinarios nuevos.
 
 ### 11.2 Campaign Execution
 
@@ -417,7 +417,7 @@ El administrador realiza las acciones permitidas según el estado. Una campaña 
 | `PROCESSING` | Hay resultados parciales con errores | `COMPLETED_WITH_ERRORS` |
 | `PROCESSING` | Falla total | `FAILED` |
 
-Los estados finales son históricos e inmutables. Una recuperación que requiera nuevo procesamiento debe ser trazable según la política de retries pendiente; no cambia retrospectivamente un estado final.
+Los estados finales son históricos e inmutables. La recuperación de fallo terminal crea una nueva Execution relacionada y no cambia retrospectivamente el estado final anterior.
 
 ### 11.3 Campaign Recipient
 
@@ -428,7 +428,7 @@ Los estados finales son históricos e inmutables. Una recuperación que requiera
 | `FAILED` | Fallo de envío registrado. |
 | `SKIPPED_DUPLICATE` | Compra duplicada para la misma Campaign; no se envía otra invitación. |
 
-**OPEN:** transición desde `FAILED` durante retry y distinción entre aceptación de solicitud y entrega definitiva.
+La transición desde `FAILED` se representa mediante una nueva Execution relacionada, no mediante mutación de estado terminal. La aceptación de solicitud, procesamiento asíncrono y entrega definitiva son estados/hechos distintos; la semántica de `SENT` y su reconciliación siguen OPEN con Emblue.
 
 ## 12. Integración funcional con Emblue
 
@@ -476,10 +476,10 @@ Los estados finales son históricos e inmutables. Una recuperación que requiera
 | OPEN-02 | Nombres/columnas, conexión, permisos, actualización y significado de jerarquías/catálogos. |
 | OPEN-03 | Identificador estable y único de compra (`purchaseId`/`transactionId`) y relación con cliente/email. |
 | OPEN-04 | Zona horaria fuera de Ecuador, corte de ejecución y tratamiento de horarios DST ambiguos o inexistentes. La duración inclusiva está resuelta en RB-035–RB-039; la zona Ecuador y regla de fin de mes/anclaje están resueltas en RB-040 y RB-044. |
-| OPEN-05 | Política ante fecha de ejecución omitida, suspensión y reanudación de una recurrencia. |
-| OPEN-06 | Contrato final de Emblue, autenticación, lote, límites, respuestas e idempotencia. |
+| OPEN-05 | CLOSED para reglas funcionales de consolidación, ventana inicial de 30 días, Suspend/Resume y EndDate; quedan OPEN parámetros de operación y retención de fuente. |
+| OPEN-06 (parcial) | Cerrado para envío individual API v2.3: endpoint `POST /emails/send`, autenticación Bearer, body `{ sendRequest: { to, html, actionId, subject } }` y response `{ activityId: string }`, con `activityId` como aceptación API únicamente. Siguen OPEN gestión/rotación de credenciales por ambiente, template, límites, procesamiento/entrega, consulta `/activities/find`, idempotencia y reconciliación. |
 | OPEN-07 | Eventos de DataLab/Webhooks, firma, orden, deduplicación, retries y semántica de entrega. |
-| OPEN-08 | Política de retries, backoff, fallos ambiguos y definición de fallo total/parcial. |
+| OPEN-08 | CLOSED: máximo 3 retries automáticos además del envío inicial, solo transitorios confirmados, backoff exponencial+jitter, nueva Execution relacionada y no retry ambiguo/permanente. Quedan OPEN el clasificador/códigos y parámetros de backoff dependientes del contrato/operación. |
 | OPEN-09 | Mecanismo de Response Attribution, expiración y respuesta a enlaces reenviados. |
 | OPEN-10 | Permisos específicos de consulta de recipients y reintentos operativos; no bloquea el acceso Campaign ya aprobado para roles efectivos ADMIN/SUPERADMIN. |
 | OPEN-11 | Reglas de correo inválido, destinatario duplicado, supresión/consentimiento y sus conteos. |
@@ -501,10 +501,24 @@ Los estados finales son históricos e inmutables. Una recuperación que requiera
 - Roles efectivos autorizados y alcance multiempresa se fijan conforme a decisiones aprobadas; catálogo MOCK se limita a desarrollo/pruebas.
 - El documento queda en estado **DRAFT**, versión **0.4**; aprobación formal pendiente.
 
+## 17.1 Recuperación, suspensión y finalización (decisiones APPROVED)
+
+Estas reglas cierran las propuestas de downtime/recovery para v1 y prevalecen sobre OPENs anteriores de este documento:
+
+- Los slots vencidos elegibles se consolidan en una sola unidad de recovery por Campaign; no se reproduce un envío por cada slot omitido.
+- El backlog automático inicial es de 30 días, configurable. Si la ocurrencia elegible más antigua excede la ventana, se alerta y requiere intervención; no se descartan ni avanzan como procesados los datos pendientes.
+- `Suspend` impide claims y lotes nuevos. El lote ya iniciado puede finalizar de forma segura y persistir sus resultados.
+- `Resume` antes de `EndDate` evalúa el recovery consolidado y calcula el siguiente slot ordinario futuro. Después de `EndDate` solo puede recuperar trabajo de slots originalmente válidos; nunca crea slots ordinarios posteriores.
+- `COMPLETED` exige calendario concluido y cero trabajo pendiente, en curso o recuperable. Executions terminales son inmutables; una recuperación de fallo terminal usa una Execution nueva relacionada.
+- `lastExecutionAt` representa `finishedAt` de la Execution terminal más reciente, incluyendo `FAILED`.
+- Las claves de Execution son deterministas y versionadas; claims atómicos, lease y fencing o protección equivalente impiden que un worker rezagado escriba o envíe luego de perder propiedad.
+
+**OPEN técnico/externo:** canales y umbrales de alerta, ventana configurable por ambiente, parámetros base/tope del backoff, consulta de estado/idempotencia de Emblue y clasificación documentada de errores. No se asume garantía de idempotencia del proveedor.
+
 ## 18. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.4
+- **Version:** 0.5
 - **Base funcional:** baseline descrita en `PEC-SC-ARCH-001.md`.
 - **Aprobación:** pendiente de revisión funcional y resolución de los OPENs aplicables.
 
@@ -518,3 +532,10 @@ Los estados finales son históricos e inmutables. Una recuperación que requiera
 | 0.4 | 2026-10-21 | Se cierra la duración de recurrencias como conteo inclusivo de fechas de calendario para RB-035–RB-039; zonas horarias, DST y ejecución en End Date continúan OPEN. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se aprueba `America/Guayaquil` como zona predeterminada de Campaign para Ecuador, la persistencia explícita de `timeZone` sin inferencia del navegador y la ocurrencia inclusiva en `End Date`; publicación y recuperación/reanudación permanecen OPEN. Se corrige la referencia interna de versión 0.3. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se aprueba para `MONTHLY`/`QUARTERLY` el anclaje al día original de `StartDate`, con ajuste al último día disponible sin drift acumulativo; se aplica a años bisiestos y antes de convertir las fechas locales a UTC. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Cierra políticas v1 de backlog consolidado de 30 días, Suspend/Resume, completitud, Execution terminal inmutable, retry selectivo máximo 3 para errores transitorios confirmados y `lastExecutionAt`; contratos de clasificación/reconciliación Emblue siguen OPEN. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Cierra solo el contrato de request/response del envío individual emBlue API v2.3 con evidencia aportada; deja consulta de actividad, idempotencia y entrega OPEN. Estado DRAFT conservado. |
+
+
+### Convención Database-First (2026-10-23)
+
+PostgreSQL es la fuente de verdad. Los cambios estructurales se entregan como SQL para ejecución manual y se reflejan después en schema.prisma; Prisma Client se genera desde ese modelo. Esta convención no cambia reglas funcionales ni el estado DRAFT.

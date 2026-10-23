@@ -4,7 +4,7 @@
 |---|---|
 | ID | PEC-SC-API-001 |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Explicaciones en español; rutas, DTOs, enums y nombres técnicos en inglés |
 | Documentos base | `PEC-SC-ARCH-001.md`, `PEC-SC-FOUND-001.md`, `PEC-SC-DATA-001.md` |
@@ -267,13 +267,13 @@ Validaciones: transición permitida; Survey existente, accesible y `PUBLISHED`; 
 
 `PATCH /survey-campaigns/:campaignId/suspend`
 
-Request sin body. Respuesta `200`: Campaign con `status: "SUSPENDED"`. Desde `SCHEDULED` o `ACTIVE`; campaña suspendida no inicia nuevas ejecuciones. Si ya hay una Execution `PROCESSING`, aplica la política OPEN del documento funcional.
+Request sin body. Respuesta `200`: Campaign con `status: "SUSPENDED"`. Desde `SCHEDULED` o `ACTIVE`; suspender bloquea claims/lotes nuevos y permite que el lote ya iniciado finalice y persista. La operación debe serializarse con claims para impedir una carrera que arranque otro lote.
 
 ### 5.8 Resume
 
 `PATCH /survey-campaigns/:campaignId/resume`
 
-Request sin body. Respuesta `200`: Campaign reanudada y `nextExecutionAt` según la regla aprobada. Desde `SUSPENDED` solamente. Revalidar publicación, audiencia, proveedor real, zona explícita y calendario. Estado resultante `SCHEDULED` o `ACTIVE` depende de si ya hubo ejecuciones; la fecha vencida durante suspensión, recovery y finalización al reanudar quedan OPEN según FOUND-001. **Resume permanece bloqueado** hasta resolver las precondiciones de scheduling.
+Request sin body. Respuesta `200` o `202` si recovery asíncrono: Campaign reanudada y estado operativo de recovery. Desde `SUSPENDED` solamente. Antes de EndDate evalúa una recovery consolidada y calcula el siguiente slot ordinario futuro; después de EndDate no crea slots ordinarios y solo puede recuperar trabajo de slots originalmente válidos. Revalidar publicación, audiencia real, fuente no MOCK, zona explícita y calendario. **Resume permanece bloqueado** hasta resolver esas precondiciones.
 
 ### 5.9 Cancel
 
@@ -465,11 +465,11 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 - **OPEN-API-04:** Compleción mínima permitida de `DRAFT` y obligatoriedad/identificador de `emailTemplateExternalId`.
 - **OPEN-API-05:** Fuente de catálogos/audiencia, dependencias de padres y representación/serialización de arrays de IDs externos.
 - **OPEN-API-06:** Límites de `perPage` y `sampleSize`, allowlists finales de ordenamiento y normalización/case-sensitivity de las búsquedas; los campos, combinación AND y significado de `total` quedan fijados en este contrato.
-- **OPEN-API-07 (parcial):** Cerrados: `America/Guayaquil` como zona predeterminada para Ecuador, persistencia explícita de `timeZone` antes de programación efectiva, no inferencia del navegador, `EndDate` local inclusiva y regla de anclaje/ajuste de fin de mes para `MONTHLY`/`QUARTERLY`. OPEN: otros mercados, conversión local/UTC, DST/horas ambiguas y el efecto de downtime/reanudación/finalización.
-- **OPEN-API-08:** Política idempotente de comandos ante estado ya objetivo; `Idempotency-Key` y control por `version`/ETag.
+- **OPEN-API-07 (parcial):** Cerrados: `America/Guayaquil` para Ecuador, persistencia explícita, no inferencia del navegador, `EndDate` inclusiva, anclaje month-end y políticas de downtime/recovery/Resume/fin. OPEN: otros mercados, DST/horas ambiguas y conversión local/UTC donde no esté cubierta por el servicio temporal.
+- **OPEN-API-08 (parcial):** Los comandos de ciclo deben ser idempotentes ante estado ya objetivo y no duplicar Execution/avance. OPEN: elección de `Idempotency-Key`/ETag y uso efectivo del `version` PEC.
 - **OPEN-API-09:** Campos enmascarados autorizados de Recipient, registro/auditoría de consultas y tratamiento de errores del proveedor.
 - **OPEN-API-10:** Soft delete para DRAFT sin historial; DATA-001 marca `deletedAt` como propuesta, no patrón PEC global verificado.
-- **OPEN-API-11:** Comportamiento de suspensión/cancelación con Execution en curso y reanudación tras tiempo vencido.
+- **OPEN-API-11 (parcial):** Suspend/Resume y recuperación en curso están definidos funcionalmente en 2.9.1. OPEN: Cancel con Execution/lote en curso y cuerpo/código HTTP para backlog excedido.
 - **OPEN-API-12:** Códigos de error estables y mapping status HTTP para Survey no publicado y errores de fuente corporativa.
 
 ## 15. Criterios de aceptación del contrato
@@ -490,10 +490,26 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 - Campaign selector uses dedicated `GET /survey-campaigns/surveys`, protected by CASL Campaign; general `/surveys` permissions stay unchanged.
 - No se definen contratos externos Analytics/Emblue ni se habilitan scheduler, audiencia real o envios con MOCK.
 
+## 15.1 Contratos de ciclo operativo (propuestos; endpoints no implementados)
+
+Las rutas de Schedule, Suspend y Resume descritas en §5/§13 son contratos propuestos, no implementados. La política de estado y recovery es APPROVED; todo comando mantiene autenticación/CASL Campaign, control de concurrencia y no depende de empresa activa. Repetir el comando con el estado ya objetivo debe ser idempotente: devolver estado/operación existente, sin crear Execution ni avanzar calendario por segunda vez.
+
+| Comando | Efecto aceptado |
+|---|---|
+| `PATCH /survey-campaigns/:campaignId/schedule` | Valida todas las precondiciones; transición `DRAFT → SCHEDULED`, persiste primer `nextExecutionAt`; no envía dentro del request. Sigue bloqueado por Survey `PUBLISHED`, audiencia y contratos no MOCK. |
+| `PATCH /survey-campaigns/:campaignId/suspend` | `SCHEDULED/ACTIVE → SUSPENDED`; impide claims nuevos. Lote iniciado termina/persiste antes de reportar que no hay trabajo en vuelo, si la implementación espera drenaje. |
+| `PATCH /survey-campaigns/:campaignId/resume` | `SUSPENDED → SCHEDULED` antes de primera Execution o `ACTIVE` si ya hubo procesamiento; devuelve `202` cuando recovery se encola. Antes de EndDate: recovery consolidado y próximo slot futuro; después: solo slots históricos originalmente válidos. |
+
+Una respuesta exitosa de endpoint indica aceptación/persistencia del comando, no procesamiento de Execution ni entrega efectiva de correo. No usar el término de UI `Enviada` para inferir entrega. Los nombres de códigos/cuerpo para backlog >30 días y alertas operativas deben fijarse en API review; la política es alertar y solicitar intervención sin descartar datos.
+
+### Actualización Sprint 3.1A — servicio interno, sin endpoints nuevos
+
+`CampaignExecutionService` es un proveedor interno de NestJS; no agrega rutas ni cambia DTOs HTTP de Campaign. Sus operaciones internas crean Execution idempotente por `(campaignId, executionKey)`, reclaman/reclaman leases mediante CAS y fencing, registran Attempt/outcome y finalizan solo desde `PROCESSING`. La recuperación guarda los slots originales en el snapshot; los retries son nuevas Executions con `scheduledAt`, `recoveryOfExecutionId` y Attempts para recipients elegibles. `Campaign.version` permanece sin uso como control optimista en esta fase. No se conecta al controller, scheduler, audiencia ni `EmblueService`.
+
 ## 16. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.4
+- **Version:** 0.5
 - **Fuentes revisadas:** ARCH-001, FOUND-001, DATA-001, controllers/DTOs/guards/pipes y filtro global de `pec-api`.
 - **Pendiente:** resolver permisos especificos de recipients, Survey PUBLISHED, contratos CF/Analytics/Emblue y reglas temporales/operativas OPEN.
 - **No incluidos en este contrato:** rutas de proveedores externos, politica Analytics real, implementacion de scheduler/envios y migraciones ejecutadas por este documento.
@@ -508,3 +524,9 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 | 0.4 | 2026-10-21 | Se cierra en OPEN-API-07 el cálculo inclusivo de duración para validar frecuencias; zona horaria y End Date de ejecución permanecen OPEN. Se aclara que los borradores pueden conservar configuración pendiente. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se aprueba la zona predeterminada `America/Guayaquil` para Ecuador, su persistencia explícita antes de programar y EndDate local inclusiva; no inferir zona del navegador. Schedule/Resume quedan bloqueados hasta resolver publicación, audiencia real y precondiciones. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Documenta cálculo local anclado a StartDate y ajuste MONTHLY/QUARTERLY al último día del mes, sin drift y antes de UTC; no modifica payload ni modelo. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Define contratos propuestos de Schedule/Suspend/Resume, recovery consolidada, backlog y semántica de ejecución terminal; diferencia aceptación API, procesamiento asíncrono y entrega. Estado DRAFT conservado. |
+
+
+### Convención Database-First (2026-10-23)
+
+Prisma se utiliza como ORM y generador del cliente desde schema.prisma; PostgreSQL se administra mediante SQL manual. NestJS no presupone que Prisma aplique DDL en despliegue. El entrypoint del checkout tiene una ruta opcional RUN_MIGRATIONS=true, pero el template Helm revisado no la configura; consultar ARCH-001. La ausencia de una fila en _prisma_migrations no bloquea Prisma Client. DRAFT conservado.

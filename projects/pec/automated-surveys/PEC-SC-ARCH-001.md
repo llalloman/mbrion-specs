@@ -4,7 +4,7 @@
 |---|---|
 | ID | PEC-SC-ARCH-001 |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; nombres de código en inglés |
 | Baseline funcional | Requisitos aprobados entregados para este informe |
@@ -48,7 +48,7 @@ Definir cómo PEC puede administrar y ejecutar campañas automatizadas que reuti
 | UI | El frontend administrativo es Angular 17 con Angular Material y tiene un módulo de encuestas. | `pec-ui/package.json`, `pec-ui/src/app/modules/otros/surveys/` |
 | Navegación | Hay una ruta/pantalla inicial para campañas automatizadas, pero no se verificó un servicio API persistente de campañas. | `pec-ui/src/app/modules/otros/surveys/`, rutas de `surveys` |
 | Audiencia corporativa | El servicio de clientes encontrado consulta APIs de contacto individuales; no se identificó en el código una vista corporativa de compras/divisiones/departamentos que resuelva la audiencia solicitada. | `pec-api/src/client/client.service.ts` |
-| Emblue | No se identificó un adaptador o contrato Emblue implementado en el checkout inspeccionado. | Búsqueda en `pec-api/src/` y dependencias |
+| Emblue | En el baseline inspeccionado antes del Sprint 3.0 no se identificó un adaptador; ver la actualización de implementación más reciente en §17.1. | Búsqueda inicial en `pec-api/src/` y dependencias |
 | Cola/claim compartido | No se verificó una infraestructura actual de cola o mecanismo de claim para ejecuciones de campañas. | Inspección de módulos y dependencias del API |
 
 Los hallazgos describen el checkout inspeccionado, no certifican configuración desplegada ni contratos externos. Los archivos de UI de campañas pueden ser un shell visual; no se consideran prueba de persistencia ni de envío real.
@@ -305,7 +305,7 @@ No se verificó un mecanismo reutilizable de claim de campañas en el checkout. 
 |---|---|---|
 | Fuente corporativa CF/Analytics | PEC leerá catálogos y, en otra fase, audiencia | **OPEN:** no hay contrato real ni evidencia de endpoint, autenticación, campos o jerarquías. |
 | `MockCampaignCatalogProvider` | Catálogos sintéticos aislados del frontend mediante el contrato Campaign | **MOCK:** seis catálogos; IDs y labels sintéticos identificados como MOCK; relaciones para probar dependencias, no confirmadas por CF. Se activa solo con `CAMPAIGN_CATALOG_PROVIDER=mock` fuera de producción; no es fallback. |
-| Emblue Transactional Email API | PEC → Emblue | **OPEN:** autenticación, endpoint, plantilla, tamaño/rate limit, respuesta por elemento, idempotencia, límites, estados y manejo de errores. |
+| Emblue Transactional Email API | PEC → Emblue | **Parcialmente confirmado:** envío individual v2.3 por `POST /emails/send`, Bearer, body confirmado y response `{ activityId }`. **OPEN:** plantilla, límites, procesamiento/entrega, idempotencia, consulta de actividad y reconciliación. |
 | Emblue DataLab/Webhooks | Emblue → PEC | **OPEN:** eventos y campos disponibles, firma, reintentos del proveedor, orden, identificador único, política de replay y exposición de aperturas/clics/bounces. |
 | PEC Surveys | Campaign → Survey existente | Reutilizar metadatos y URL/flujo existentes. Validar disponibilidad y estado de publicación sin duplicar SurveyJS. |
 | PEC Public Survey | Invitación → respuesta | Incorporar correlación segura sin PII en URL; validar cambios mínimos requeridos al flujo público y modelo de respuesta. |
@@ -387,7 +387,7 @@ Propuesta de observabilidad:
 | OPEN-03 Elegibilidad temporal | Zona horaria, corte, lookback, datos tardíos y significado de `ExecutionDate`. | Negocio/datos |
 | OPEN-04 Emblue | API transaccional, autenticación, plantillas, tamaños, rate limits, respuesta por destinatario e idempotency key. | Equipo PEC/Emblue |
 | OPEN-05 Eventos Emblue | DataLab/Webhooks, firma, eventos, claves, orden, retries y deduplicación. | Equipo PEC/Emblue |
-| OPEN-06 Recovery/retries | Número de intentos, backoff, expiración/lease, resultados ambiguos y cuándo reabrir ejecución. | Negocio/operaciones |
+| OPEN-06 Recovery/retries | Semántica funcional cerrada en 2.9.1: hasta 3 intentos automáticos de retry además del inicial, para transitorios confirmados, backoff exponencial+jitter, no retry ambiguo/permanente y terminales inmutables. OPEN: clasificación real de errores, valores base/tope, lease y reconciliación provider. | PEC/operación/Emblue |
 | OPEN-07 Atribución | Diseño del token, expiración, almacenamiento, consumo/reuso y cambios en public survey. | Seguridad/equipo PEC |
 | OPEN-08 Roles | El acceso Campaign esta aprobado solo para ADMIN/SUPERADMIN efectivos; siguen pendientes los permisos especificos para recipients y operaciones no cubiertas. | Producto/seguridad |
 | OPEN-09 Timezone/calendario | Cerrado parcialmente: Ecuador usa `America/Guayaquil` como zona predeterminada y se persiste explícitamente sin inferir el navegador; End Date es inclusiva local, el slot exacto a Send Time es válido y no hay posteriores; MONTHLY/QUARTERLY usan ancla StartDate y ajuste al último día sin drift. Permanecen OPEN conversión local→UTC, DST y efectos de recovery/downtime/reanudación sobre End Date. | Negocio/arquitectura |
@@ -422,10 +422,24 @@ Estas fases expresan secuencia arquitectónica, no tareas técnicas ni autorizac
 - Los estados de Survey y roles PEC se mapean al comportamiento real del repositorio y no quedan como supuestos en producción.
 - Métricas, alertas y métricas externas se limitan a señales soportadas y acordadas; no se presentan aperturas/clics no verificados.
 
+## 17.1 Decisiones de scheduler/recovery v1 y brecha actual
+
+Políticas APPROVED: consolidar slots vencidos elegibles en una sola recovery por Campaign; backlog automático inicial de 30 días configurable, con alerta/intervención al excederlo y sin descartar datos; Suspend bloquea claims/lotes nuevos y deja drenar el lote iniciado; Resume antes de EndDate consolida recovery y calcula el siguiente slot futuro, después de EndDate solo recupera slots originalmente válidos. Campaign solo es COMPLETED cuando terminó el calendario y no hay trabajo pendiente, en curso o recuperable. Execution terminales son inmutables; retries selectivos se modelan con nuevas Executions relacionadas, hasta 3 intentos automáticos de retry además del inicial para errores transitorios confirmados y backoff exponencial+jitter. Ambiguo/permanente no se reintenta. `lastExecutionAt` refleja `finishedAt` de la terminal más reciente, incluido FAILED.
+
+Diseño recomendado: clave determinista/versionada para slot, rango consolidado y retry; claim atómico en transacción corta; lease con generación de fencing validada antes de cada dispatch/escritura; snapshot inmutable con slots cubiertos y configuración temporal. No mantener transacción abierta en llamadas externas. La solución concreta row-lock/CAS y parámetros operativos requieren validación de versión Postgres/Prisma y carga.
+
+**Brecha del checkout inspeccionado previo al Sprint 3.0:** Prisma ya contiene `executionKey` único por Campaign, `recovery`, FK singular `recoveryOfExecutionId`, lease (`claimOwner/claimedAt/claimExpiresAt`), `nextExecutionAt`, `lastExecutionAt` y ledger único Campaign + purchase. En esa inspección no se encontró scheduler ni adapter Emblue; no hay fencing generation, programación retry persistida ni estado Attempt inequívoco para resultado ambiguo/aceptación/procesamiento/entrega. El servicio actual carece de comandos Schedule/Suspend/Resume y no se observó uso optimista de `version`. Estos campos/mecanismos requieren diseño de cambio Prisma/API en sprint posterior; no se aplican aquí.
+
+**Evidencia Emblue reportada por el usuario:** campaña de integración y acción Email activa; `actionId=6388219`; prueba manual Postman con `POST https://api.embluemail.com/v2.3/emails/send` recibió correo. Esto valida únicamente una prueba individual externa reportada. No prueba integración NestJS, asíncrono, idempotencia, reconciliación ni recuperación. API acceptance, processing y entrega son hechos separados. No se documentan secretos ni se asume una garantía de Emblue.
+
+**Actualización Sprint 3.0:** el checkout incluye `EmblueModule` y `EmblueService.sendEmail()` para el contrato de envío v2.3 confirmado: `POST /emails/send`, body `{ sendRequest: { to, html, actionId, subject } }` y respuesta `{ activityId: string }`. Pasaron las 21 pruebas unitarias del servicio y el build NestJS. Además, el usuario ejecutó el script manual NestJS: una solicitud devolvió HTTP 200 y un `activityId`. Esto demuestra aceptación de esa solicitud por la API; no verifica procesamiento posterior ni entrega final. No están implementados `findActivity()`, idempotencia persistida, scheduler ni conexión del adapter al flujo de campañas. No se registra el destinatario ni el identificador de actividad.
+
+**Actualización Sprint 3.1A:** el checkout incorpora `CampaignExecutionService`, registrado/exportado únicamente en `SurveyCampaignsModule`; no añade rutas públicas y no invoca `EmblueService`. Se agregaron localmente `claimGeneration` y campos de outcome/attempt/activityId; la lista de slots originales se conserva en `configurationSnapshot`. La migración es aditiva y está sin aplicar. Build NestJS y 13 pruebas unitarias mock pasan; `prisma validate` pasa. Prisma Client no pudo regenerarse por `EPERM` al reemplazar el engine Windows. No hay variable `CAMPAIGN_TEST_DATABASE_URL`, por lo que no se verificó PostgreSQL real ni concurrencia interproceso. No se inicia scheduler ni envíos.
+
 ## 18. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.4
+- **Version:** 0.5
 - **Validación técnica:** Se inspeccionó la estructura actual del checkout para identificar módulos de encuestas, Prisma/PostgreSQL, Angular y `@nestjs/schedule`.
 - **Pendiente:** Validar contratos externos, decisiones OPEN y encaje final con los responsables de PEC, Analytics, Emblue, seguridad y operación.
 - **Aprobación formal:** pendiente; esta actualización no cambia DRAFT.
@@ -440,3 +454,62 @@ Estas fases expresan secuencia arquitectónica, no tareas técnicas ni autorizac
 | 0.4 | 2026-10-20 | Se establece español obligatorio en UI, etiquetas centralizadas, preservación de valores técnicos, fechas y paginación localizadas. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Formaliza zona predeterminada `America/Guayaquil` y End Date inclusiva local; delimita los OPEN temporales restantes sin cambiar el estado DRAFT. |
 | 0.4 | 2026-10-21 | Registra la política aprobada de ancla StartDate y ajuste MONTHLY/QUARTERLY al último día disponible sin drift acumulativo, también en año bisiesto. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Formaliza políticas de scheduler/recovery, diseño de claim/fencing y brechas Prisma/API; registra prueba manual Emblue reportada con alcance limitado. No implementa ni activa ejecución. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra el contrato de envío emBlue API v2.3 confirmado, el adapter NestJS y 21 pruebas unitarias; mantiene consulta de actividad, idempotencia persistida, ejecución de campañas y entrega final como pendientes. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra una ejecución manual NestJS reportada por el usuario con HTTP 200 y `activityId`; solo acredita aceptación API, sin inferir entrega ni registrar destinatario/ID. Estado DRAFT conservado. |
+
+### Validación Sprint 3.1A.1 — base de desarrollo (2026-10-23)
+
+La consulta READ ONLY confirmo que el SQL 20261023000000_add_campaign_execution_controls coincide con el esquema y no figura en _prisma_migrations. El DDL ya fue aplicado manualmente segun confirmacion del usuario; bajo Database-First no requiere reconciliar el historial Prisma.
+
+La fila incompleta 20250907231907_add_user_establishment_table es un dato historico de _prisma_migrations; no se modifico. Bajo Database-First no bloquea Prisma Client ni las operaciones DDL manuales; el proceso acordado no ejecuta migrate deploy.
+
+
+### Convención Database-First y despliegue (2026-10-23)
+
+Esta sección es la referencia vigente y supersede notas anteriores que trataran la ausencia de filas en _prisma_migrations como bloqueo o recomendaran prisma migrate resolve. PostgreSQL es la fuente de verdad. El DDL se prepara como SQL revisable y se ejecuta manualmente; schema.prisma se sincroniza con el esquema aplicado y prisma generate actualiza el cliente. No se ejecutan migrate deploy/dev/resolve, db push ni migrate reset como mecanismo de despliegue de esquema.
+
+Inspección del checkout: Dockerfile genera Prisma Client durante build. docker-entrypoint.sh también intenta generarlo al iniciar. Ese entrypoint solo corre migrate deploy si RUN_MIGRATIONS=true. El template Helm revisado no define esa variable ni reemplaza CMD start:prod; con esos valores omite DDL. Overrides externos deben verificarse aparte. El DDL de los controles de ejecución se mantiene en prisma/manual-sql/campaign_execution_controls.sql; la migración inicial `20261018000000_add_automated_survey_campaigns` continúa en prisma/migrations y podría ser considerada si se habilitara migrate deploy.
+
+La migración no registrada en _prisma_migrations y el registro incompleto preexistente de 20250907231907_add_user_establishment_table son datos históricos; no bloquean Prisma Client bajo el modelo aprobado. Prisma generate finalizó correctamente en la verificación posterior; build y 84 pruebas unitarias Campaign pasaron con el cliente generado. Pruebas PostgreSQL con escrituras siguen pendientes de entorno aislado. Estado DRAFT conservado.
+
+### Sprint 3.1A.2 — aislamiento de integración y despliegue (2026-10-23)
+
+La suite PostgreSQL de Campaign admite únicamente un servidor local loopback, base dedicada `pec_campaigns_test` y rol propietario `campaign_test`, comprobando además la identidad reportada por PostgreSQL antes de cualquier fixture. No se permite Neon ni el uso de `DATABASE_URL` como fallback. Las filas sintéticas se etiquetan con UUID y se limpian por clave primaria rastreada; no se ejecutan limpiezas globales.
+
+El modelo de despliegue sigue siendo Database-First: el SQL se aplica manualmente y `prisma generate` genera el cliente. El chart Helm revisado no activa `RUN_MIGRATIONS`; sin embargo, `docker-entrypoint.sh` conserva la rama que ejecuta `prisma migrate deploy` si un override establece esa variable a `true`. No se alteró el comportamiento de despliegue. Recomendación pendiente de aprobación: retirar la rama de migración automática o rechazar explícitamente `RUN_MIGRATIONS=true` para impedir DDL accidental en bases administradas manualmente. Deben revisarse también overrides del release y pipelines, porque los valores actuales del chart no prueban su configuración efectiva en todos los entornos.
+
+La concurrencia PostgreSQL aún no está comprobada: no existe URL configurada para la instancia local aislada y no se conectó a Neon. Build/unit tests no acreditan comportamiento multiworker real.
+
+## Historial de cambios
+
+| Versión | Fecha | Cambios |
+|---|---|---|
+| 0.5 | 2026-10-23 | Añade política de aislamiento PostgreSQL para pruebas de Campaign y registra el riesgo pendiente de la ruta condicional `RUN_MIGRATIONS=true` bajo Database-First. No cambia despliegues. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra base PostgreSQL Docker aislada y validación real de concurrencia 3.1A; documenta IP interna Docker, carrera de `executionKey` corregida y riesgo `RUN_MIGRATIONS` pendiente. Estado DRAFT conservado. |
+
+Aclaración del árbol actual: `prisma/migrations/20261018000000_add_automated_survey_campaigns/migration.sql` sigue existiendo en el checkout. El DDL adicional de controles está en `prisma/manual-sql/campaign_execution_controls.sql`, pero eso no elimina la migración inicial de Campaign ni el resto del historial. Si `RUN_MIGRATIONS=true`, Prisma podría intentar aplicar cualquier migración pendiente de esa cadena contra la base configurada. El riesgo refuerza la recomendación de bloquear la ruta automática bajo Database-First; no se cambió ni movió este archivo.
+
+### Sprint 3.1A.3 — decisión operativa Database-First (2026-10-23)
+
+El entorno actual no tiene PostgreSQL local disponible: Docker Desktop está instalado, pero `com.docker.service` está detenido y el cliente no accede al engine; PostgreSQL server/client no están instalados; 5432 está libre; la URL de pruebas no está definida. No se inició servicio, no se creó una base ni se conectó a Neon. El `docker-compose.yml` existente no es seguro como banco de prueba aislado porque lee `.env`, levanta NestJS, retiene un volumen y publica en 5435.
+
+Para validar Campaign se requerirá autorización explícita para iniciar Docker Desktop y crear un contenedor local separado con bind `127.0.0.1:5432`, base/rol propietario `pec_campaigns_test`/`campaign_test`, volumen propio y credenciales sintéticas temporales. Después se verificará la identidad SQL del servidor antes de configurar la URL solo en el proceso de Jest. No aplicar migraciones automáticamente ni importar datos reales. Debe prepararse primero un SQL bootstrap completo y revisable compatible con el esquema requerido; el SQL manual de controles por sí solo no crea las tablas PEC base.
+
+Corrida de regresión actual: ningún test Campaign aparece entre las 23 suites fallidas; las pruebas Campaign seleccionadas pasan 90/90. Sin una corrida comparable del commit anterior a Campaign, no se puede afirmar que los 61 fallos restantes sean preexistentes o causados por cambios de este módulo.
+
+Bajo Database-First se recomienda retirar del entrypoint la ejecución condicional de `prisma migrate deploy` y fallar explícitamente si se intenta activar `RUN_MIGRATIONS=true`; `prisma generate` no ejecuta DDL y debe permanecer independiente. Añadir verificación CI de overrides y release values. Esta protección requiere un cambio posterior aprobado; no se realizó aquí.
+
+Estado Sprint 3.1A: pendiente hasta validar concurrencia real PostgreSQL. SPECS v0.5 / DRAFT conservado.
+
+### Sprint 3.1A.3 — entorno aislado comprobado (2026-10-23)
+
+Se creó el contenedor local dedicado `pec-campaign-test-db-sprint313` desde `postgres:15.4-alpine`, sin volumen, sin política de reinicio y con puerto ligado exclusivamente a `127.0.0.1:5432`. La base `pec_campaigns_test` es propiedad de `campaign_test`. El esquema se derivó del `schema.prisma` actual y se aplicó solo a esta base vacía mediante SQL generado; no se ejecutó Prisma Migrate, no se modificó el contenedor de pruebas anterior, Neon, ni otra base.
+
+El servidor dentro de Docker reporta una IP privada RFC1918 aunque la conexión de la aplicación use `127.0.0.1`. El guard mantiene la validación de host URL loopback, nombre de base, puerto, esquema, rol y propietario, y acepta para `inet_server_addr` loopback o una dirección privada Docker. Se añadieron pruebas de rechazo de IP pública.
+
+La concurrencia real validó CAS/fencing, leases, unicidad de `executionKey`, terminales inmutables, progreso, retry selectivo y recovery consolidada. La carrera de creación concurrente reveló que `upsert` podía devolver `P2002`; Campaign ahora consulta la fila existente al recibir esa colisión y devuelve al ganador, con cobertura unitaria y PostgreSQL. El fixture utiliza registros sintéticos con UUID, crea Country/Enterprise/User/Survey con sus campos requeridos y los borra por IDs rastreados; la verificación posterior encontró cero registros de prueba.
+
+Resultado de cierre Sprint 3.1A: 15/15 pruebas PostgreSQL, 108/108 pruebas Campaign, build NestJS y ESLint focalizado aprobados. Esto permite cerrar la validación de infraestructura de persistencia/concurrencia de Sprint 3.1A en ambiente local; no habilita scheduler ni envíos y no inicia Sprint 3.1B. La suite general sigue con 61 fallos distribuidos en módulos ajenos; sin baseline comparable no se clasifican como preexistentes.
+
+La rama `RUN_MIGRATIONS=true` sigue siendo un riesgo de DDL automático para Database-First. El chart revisado no la habilita por defecto, pero no se verificaron overrides de despliegue reales. Se recomienda un cambio posterior que la rechace/elimine y un guard CI; no se modificó despliegue en esta fase.

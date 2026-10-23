@@ -7,11 +7,11 @@
 | Documento | PEC-SC-INTEG-001 |
 | Título | Especificación de Integraciones - Automated Survey Campaigns |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; nombres técnicos en inglés |
 
-> Este documento describe las fronteras funcionales de integración aprobadas para Automated Survey Campaigns. Los contratos de CF/Analytics y Emblue no han sido entregados; los detalles que dependen de ellos se identifican como **OPEN**. No define endpoints externos concretos ni sustituye ARCH-001, FOUND-001, DATA-001 o API-001.
+> Este documento describe las fronteras funcionales de integración aprobadas para Automated Survey Campaigns. CF/Analytics permanece sin contratos. Para emBlue solo se confirmó parcialmente el envío individual API v2.3 (`POST /emails/send`, request y response con `activityId`); consulta de actividad, procesamiento, entrega, idempotencia y webhooks siguen **OPEN**. No define endpoints externos adicionales ni sustituye ARCH-001, FOUND-001, DATA-001 o API-001.
 
 ## 1. Propósito y alcance
 
@@ -159,12 +159,12 @@ Respuesta conceptual: Emblue puede confirmar técnicamente la aceptación/rechaz
 
 - **Batches:** el adapter debe poder operar dentro de los límites confirmados por Emblue. El tamaño y concurrencia no se fijan aquí. Si el proveedor no permite lotes, el adapter deberá ajustarse a su operación documentada.
 - **Timeout:** definir límites de conexión/respuesta por ambiente al conocer latencias y contrato. Un timeout después de transmitir puede dejar resultado ambiguo; PEC no debe asumir que no hubo envío.
-- **Retry:** la política debe distinguir rechazo permanente, fallo transitorio y resultado ambiguo. Un reintento automático requiere evidencia de que no duplica el envío o soporte de idempotencia/reconciliación del proveedor. Máximo de intentos, backoff, jitter y ventana quedan OPEN.
+- **Retry (política APPROVED):** hasta 3 intentos automáticos de retry además del inicial para errores transitorios confirmados, backoff exponencial+jitter y nueva Execution relacionada con recipients elegibles. No reintentar automáticamente errores permanentes ni resultados ambiguos. El clasificador concreto, parámetros de espera y cualquier dependencia de idempotencia/reconciliación del proveedor siguen OPEN.
 - **Idempotencia:** PEC aplica deduplicación interna por `campaignId + purchaseId/transactionId`. Si Emblue soporta idempotency key, el adapter podrá complementarla con una clave estable y segura; formato, alcance y retención quedan OPEN. La idempotencia interna no prueba que el proveedor la soporte.
 - **Circuit breaker:** se propone evaluar un circuit breaker para aislar indisponibilidad sostenida, con estados/umbrales configurables y operación observable. Umbrales, ventanas, timeout de recuperación y si se incorpora al primer release quedan OPEN; no es comportamiento existente verificado.
 - **Recovery:** los reintentos/reprocesos no deben alterar snapshots ni estados terminales históricos de `CampaignExecution`; cada intento/outcome conserva trazabilidad en `CampaignRecipientAttempt` según DATA-001. El momento de marcar un recipient `SENT`/final y la reconciliación quedan sujetos al contrato de respuesta/eventos.
 
-La reserva temporal de un Recipient es distinta del procesamiento efectivo y del resultado del intento. DATA-001 propone `reservedAt`, `reservationOwner` y `reservationExpiresAt` para identificar y recuperar una reserva; `firstProcessedAt` solo corresponde al primer resultado que la política acordada considere procesado, no al instante de reserva. Una reserva no significa envío exitoso ni compra definitivamente procesada. Una reserva abandonada/expirada debe poder recuperarse sin causar un envío duplicado; se conserva el ledger único Campaign + Purchase y el historial de `CampaignRecipientAttempt`. No se vuelve a solicitar un envío ya confirmado. Si el resultado externo es ambiguo, no se reintenta a ciegas: la vía concreta de idempotencia/reconciliación depende del contrato real de Emblue y permanece OPEN. La política de retries no queda decidida aquí.
+La reserva temporal de un Recipient es distinta del procesamiento efectivo y del resultado del intento. Una reserva no significa envío exitoso ni compra definitivamente procesada. Una reserva abandonada/expirada puede recuperarse solo después de inspeccionar progreso y provider outcome; no volver a solicitar envío confirmado. Para outcome ambiguo no hacer resend automático; la consulta/idempotency/reconciliación debe estar documentada por Emblue y permanece OPEN.
 
 ### 5.5 DataLab / Webhook ingestion
 
@@ -214,7 +214,7 @@ sequenceDiagram
     Note over Ledger,Attempts: reservedAt/owner/expiry son reserva; no equivalen a envío ni a firstProcessedAt
     Resolver->>Ledger: Continuar procesamiento con reserva vigente
     Resolver->>Provider: Enviar template + email + variables permitidas + surveyUrl
-    Provider->>Emblue: Solicitud transaccional (endpoint/auth OPEN)
+    Provider->>Emblue: POST /v2.3/emails/send (Bearer; template/seguimiento OPEN)
     Emblue-->>Provider: Aceptación técnica/rechazo/referencias (semántica OPEN)
     Provider-->>Attempts: Registrar resultado operativo por recipient
     Note over Attempts: SENT no implica DELIVERED; significado de SENT OPEN
@@ -346,12 +346,12 @@ No crear métricas de aperturas, clics, rebotes ni entrega hasta confirmar que l
 | OPEN-INTEG-03 | Columnas, jerarquías y filtros de CF; identificador único de compra | Equipo de datos/negocio |
 | OPEN-INTEG-04 | Paginación/lotes, orden, volúmenes, límites, frescura y SLAs de CF | Equipo de datos/operación |
 | OPEN-INTEG-05 | Cutoff, zona horaria, fecha tardía y regla temporal exacta de elegibilidad | Negocio/datos |
-| OPEN-INTEG-06 | Documentación Emblue Transactional Email API, endpoint, versión y autenticación | Equipo PEC/Emblue |
+| OPEN-INTEG-06 (parcial) | Cerrado: endpoint de envío `POST /v2.3/emails/send`, autenticación Bearer, request individual confirmado y response `activityId`. OPEN: gestión/rotación de credenciales por ambiente y documentación integral del resto de la API. | Equipo PEC/Emblue |
 | OPEN-INTEG-07 | Template ownership/configuración, referencia externa y ambiente de pruebas | Equipo PEC/Emblue |
 | OPEN-INTEG-08 | Variables, formato y escape/render de template; respuesta por mensaje y referencias externas | Equipo PEC/Emblue |
 | OPEN-INTEG-09 | Tamaño de lote, límites, cuotas, timeout recomendado y estados/códigos de rechazo | Equipo PEC/Emblue |
 | OPEN-INTEG-10 | Soporte, alcance y retención de idempotency key; consulta/reconciliación de envíos ambiguos | Equipo PEC/Emblue |
-| OPEN-INTEG-11 | Política de retry, backoff, jitter, circuit breaker y recovery | PEC/operación/Emblue |
+| OPEN-INTEG-11 (parcial) | Cerrado: hasta 3 retries automáticos además del inicial, solo transitorios confirmados, backoff exponencial+jitter, nueva Execution relacionada y no retry automático permanente/ambiguo. OPEN: clasificador contractual, parámetros base/tope, circuit breaker y reconciliación | PEC/operación/Emblue |
 | OPEN-INTEG-12 | DataLab/Webhooks: eventos disponibles, schema, autenticación/firma, replay, reintentos y orden | Equipo PEC/Emblue |
 | OPEN-INTEG-13 | Garantías de opens/clicks/bounces, semántica y restricciones de privacidad | Equipo PEC/Emblue/privacidad |
 | OPEN-INTEG-14 | Correlación de respuesta: token opaco, expiración, almacenamiento y cambios en Survey público | Equipo Surveys/seguridad |
@@ -362,6 +362,26 @@ No crear métricas de aperturas, clics, rebotes ni entrega hasta confirmar que l
 
 Antes de habilitar envíos productivos deben estar documentados y revisados los contratos reales de CF/Analytics y Emblue, la autenticación por ambiente, esquema y semántica de datos, límites de lectura/envío, manejo de respuestas ambiguas, idempotencia/reintentos, autenticidad de eventos, correlación de respuestas y controles de privacidad/retención. La aprobación de esta lista no presupone que esos contratos ya existan ni modifica las decisiones funcionales aprobadas.
 
+## 12.1 Decisiones recovery y evidencia de emBlue
+
+Políticas APPROVED comunes: recuperación de slots vencidos consolidada en una unidad por Campaign; ventana automática inicial de 30 días configurable. Al excederla se alerta y requiere intervención sin descartar datos. Suspend bloquea nuevos lotes y permite finalizar/persistir el ya iniciado. Resume respeta slots ordinarios hasta EndDate local inclusiva; después del fin solo recupera slots originalmente válidos. Terminales inmutables. Retry hasta 3 intentos automáticos además del inicial para errores transitorios confirmados, con backoff exponencial+jitter, en una nueva Execution relacionada y subset elegible. Fallo permanente o resultado ambiguo no se reintenta automáticamente.
+
+Debe separarse la evidencia de tres etapas: (1) emBlue acepta o rechaza la solicitud API; (2) el proveedor procesa asincrónicamente el mensaje; (3) el correo se entrega o rebota. La respuesta manual satisfactoria en Postman no prueba por sí sola etapa 2/3 de forma general ni el flujo PEC.
+
+**Evidencia aportada por usuario, no verificada independientemente:** campaña de integración, acción Email activa, `actionId=6388219`, endpoint `POST https://api.embluemail.com/v2.3/emails/send`, request `{ sendRequest: { to, html, actionId, subject } }`, response `{ activityId: string }` y un correo recibido tras prueba individual manual desde Postman. No se registra API Key, destinatario ni contenido de `.env`. En Sprint 3.0 se implementó `EmblueService.sendEmail()` con ese contrato y pasaron 21 pruebas unitarias mock. El usuario también reportó una ejecución manual mediante el script NestJS: una solicitud devolvió HTTP 200 y `activityId`. Esto acredita la respuesta de aceptación de esa llamada; no prueba procesamiento asíncrono ni entrega final. `POST /activities/find` está pendiente de validar su response real. La idempotencia persistida, integración con CampaignExecution/Attempt, Webhooks y recovery siguen pendientes.
+
+### OPEN externos y técnicos que permanecen
+
+- Clasificación verificable de códigos como transitorios/permanentes y límites/rate limit.
+- Si el endpoint soporta idempotency key, alcance/retención, consulta por referencia y reconciliación de timeout.
+- Semántica/respuesta por request o destinatario: aceptación no equivale a procesamiento ni entrega.
+- Lote, referencias externas, estados posteriores, DataLab/Webhooks, autenticación/firma, orden y event IDs.
+- Parámetros base/tope de backoff, jitter, lease/alertas y operación cuando backlog supera 30 días.
+
+### Actualización Sprint 3.1A — límite entre adapter y persistencia
+
+El servicio interno de ejecución registra `DISPATCHING`, `ACCEPTED`, `REJECTED`, `FAILED_CONFIRMED` o `AMBIGUOUS` en el Attempt y conserva el `activityId` como referencia de aceptación. `ACCEPTED` no equivale a procesamiento ni entrega, y no cambia el estado del Recipient a `SENT`. No se llama al proveedor desde `CampaignExecutionService`; tampoco se implementó `/activities/find`, conciliación, ni retry automático. La clave interna de Attempt no se envía a emBlue ni constituye idempotencia externa. Pruebas con mocks: 13/13 del servicio de ejecución; PostgreSQL aislado y contract test siguen pendientes. Estado DRAFT conservado.
+
 ## 13. Historial de cambios
 
 | Versión | Fecha | Cambios |
@@ -369,3 +389,11 @@ Antes de habilitar envíos productivos deben estar documentados y revisados los 
 | 0.2 | 2026-10-18 | Se explicita la recuperación de compras pendientes tras fallos de lectura sin watermark/lookback ni ráfagas; se distinguen reserva, procesamiento y outcomes; se separan aceptación técnica, resultado operativo y eventos de entrega; se dividen los flujos de webhook y atribución de Survey. |
 | 0.3 | 2026-10-20 | Se añade proveedor MOCK exclusivo de Campaign, contrato estable reemplazable, datos sintéticos y reglas de seguridad; se separan sus catálogos de la audiencia real CF/Analytics y se difieren scheduler/envíos con MOCK. El documento permanece DRAFT. |
 | 0.4 | 2026-10-20 | Se requiere presentar etiquetas de catálogos MOCK en español, conservando IDs, source y contrato API. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Formaliza la política aprobada de recovery/retries, distingue aceptación API, procesamiento y entrega, y registra la prueba manual emBlue reportada con alcance limitado y sin secretos. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Confirma parcialmente el contrato de envío v2.3 y registra `sendEmail()` con pruebas mock; deja `activities/find`, idempotencia persistida, procesamiento/entrega y conexión al scheduler OPEN. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra la ejecución manual NestJS reportada (HTTP 200 y `activityId`) como aceptación API únicamente; no documenta destinatario ni afirma entrega final. Estado DRAFT conservado. |
+
+
+### Convención Database-First (2026-10-23)
+
+Las integraciones Campaign no administran DDL. Los cambios físicos se entregan como SQL revisable y se ejecutan manualmente; Prisma Client se regenera desde el modelo sincronizado. La ausencia de una fila en _prisma_migrations no bloquea el uso del adapter. DRAFT conservado.

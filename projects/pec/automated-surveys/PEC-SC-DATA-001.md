@@ -4,7 +4,7 @@
 |---|---|
 | ID | PEC-SC-DATA-001 |
 | Estado | DRAFT |
-| Versión | 0.4 |
+| Versión | 0.5 |
 | Fecha | 2026-10-20 |
 | Idioma | Español; entidades, campos, enums y nombres técnicos en inglés |
 | Documentos base | `PEC-SC-ARCH-001.md`, `PEC-SC-FOUND-001.md` |
@@ -211,7 +211,7 @@ Las filas de selección continúan guardando arrays de IDs externos y sus snapsh
 | `failedCount` | Entero | No | Conteo de fallos, default 0. |
 | `duplicateCount` | Entero | No | Conteo de candidatos duplicados, default 0. |
 | `errorSummary` | String | Sí | Error general sanitizado; no payload ni PII completa. |
-| `providerExecutionRef` | String | Sí | Referencia externa Emblue/DataLab si el contrato provee una; forma OPEN. Puede que refs por lote deban vivir en Attempts/Events. |
+| `providerExecutionRef` | String | Sí | El envío individual emBlue v2.3 devuelve `activityId` como referencia de aceptación. Su mapeo/persistencia por Execution o Attempt y cualquier referencia por lote siguen OPEN; no implica entrega. |
 | `claimOwner` | String | Sí | Identificador técnico de la réplica/worker que obtuvo claim; sin secreto. |
 | `claimedAt` | Timestamp | Sí | Inicio de lease/claim. |
 | `claimExpiresAt` | Timestamp | Sí | Vencimiento para recuperar claim abandonado; duración OPEN. |
@@ -459,12 +459,12 @@ Estas recomendaciones se deben validar con consultas reales y explain plans; no 
 | OPEN-03 | El alcance multiempresa ya está aprobado; validar que la implementación no filtre por enterprise activo. | No amplía permisos generales de Surveys ni de otros módulos. |
 | OPEN-04 | Campo/regla real que indica Survey `PUBLISHED`, archivado y disponibilidad. | Schema actual muestra `status`, `archived`, `content Json`; semántica publicada no está determinada por el schema aislado. |
 | OPEN-05 | DST/horas ambiguas o inexistentes, timezone de campañas fuera de Ecuador, conversión local/UTC y efecto de recovery/downtime sobre EndDate. El default Ecuador `America/Guayaquil`, la persistencia explícita de timezone, el límite local inclusivo y el ajuste mensual/trimestral anclado están aprobados. | Evita ambigüedad restante en calendarización; no cambia los campos físicos actuales. |
-| OPEN-06 | Semántica de `lastExecutionAt` y cuándo actualizar el próximo ciclo frente a éxito/fallo. | Impacta dashboard, recovery e idempotencia. |
-| OPEN-07 | `executionKey` exacta, granularidad de recovery, claim/lease y política de múltiples réplicas. | Evita doble ejecución y no perder slots. |
+| OPEN-06 | Cuándo avanzar el próximo ciclo ante fallos parciales y cuál es el cutoff exitoso de audiencia. `lastExecutionAt` queda definido como `finishedAt` de la terminal más reciente, incluso FAILED. | Impacta dashboard, recovery e idempotencia. |
+| OPEN-07 | Forma física exacta del `executionKey`, estrategia PostgreSQL/Prisma para claim y el campo/token de fencing. La clave debe ser determinista y versionada; claim atómico + lease + protección de worker rezagado son reglas APPROVED. | Elegir una implementación compatible con la versión PostgreSQL/Prisma usada. |
 | OPEN-08 | `purchaseId` vs `transactionId`, fuente, estabilidad, posibilidad de colisión entre sistemas y tratamiento de IDs nulos. | Define la constraint de deduplicación durable. |
-| OPEN-09 | Failed recipient: exclusión/reconsideración, política de retry, cuándo se confirma `firstProcessedAt` y cómo se proyecta estado del ledger. | No fijar la política de reintentos Emblue; una reserva abandonada o falla total no puede excluir permanentemente compras pendientes. |
+| OPEN-09 | Cuándo se confirma `firstProcessedAt`, cómo se proyecta el estado del ledger y qué errores Emblue están confirmados como transitorios/permanentes/ambiguos. Política APPROVED: hasta 3 intentos automáticos de retry además del inicial, solo transitorios confirmados, backoff exponencial con jitter, retries en nueva Execution relacionada, sin retry ambiguo/permanente. | No excluir permanentemente compras pendientes por una reserva abandonada o fallo total. |
 | OPEN-10 | Si el correo debe persistirse para retries o puede volver a leerse; cifrado y retención. | PII directa y restricción de logs. |
-| OPEN-11 | Contrato Emblue: template ID, recipient/message/batch refs, límites, idempotency key, estados y callbacks. | Determina campos de integración y unicidad de provider refs. |
+| OPEN-11 | Contrato Emblue: template ID, recipient/message/batch refs, límites, soporte/alcance de idempotency key, estados, consulta/reconciliación y callbacks. | Determina campos de integración y unicidad de provider refs; no asumir garantías no documentadas. |
 | OPEN-12 | Cardinalidad de Attempt/invitación ↔ ResponseCorrelation ↔ `sspectresult`; token único, reutilizable, múltiples respuestas. | La atribución debe derivar Campaign + Execution + Recipient; cardinalidad y constraints no se fijan sin aprobación. |
 | OPEN-13 | Duración y política del token opaco, hash, expiración, consumo y replay. | Atribución segura de encuesta. |
 | OPEN-14 | Necesidad, valor legal/funcional y retención de `CampaignProviderEvent`; formato y firma de webhook. | No persistir eventos innecesarios o PII. |
@@ -491,12 +491,29 @@ Esta sección es conceptual, no un schema ejecutable.
 | Auditoría | Evaluar estándar `created_by_user`, `created_date`, `last_modified_by_user`, `last_modified_date`, `version` e IP según política PEC, equilibrándolo con FK `createdByUserId` y con la inmutabilidad de snapshots/historial. |
 | Soft delete | `deletedAt DateTime?` es una opción conceptual, no convención existente comprobada. Resolver con Product/PEC si DRAFT Delete debe usar marca, `status` legado o mecanismo común. |
 
+## 14.1 Recuperación, claims y retries (decisiones APPROVED / propuesta física)
+
+Reglas de dominio APPROVED: slots vencidos se consolidan en una única unidad de recovery por Campaign; backlog automático inicial máximo 30 días configurable, y excederlo genera alerta/intervención sin descartar ni marcar datos procesados. Executions terminales son inmutables. Retry crea una nueva Execution relacionada y contiene solo recipients elegibles; hasta 3 intentos automáticos de retry además del inicial para errores transitorios confirmados, con backoff exponencial y jitter. Errores permanentes y ambiguos no se reintentan automáticamente. `lastExecutionAt` es `finishedAt` de la terminal más reciente, incluyendo `FAILED`.
+
+Propuesta técnica, no aplicada al schema:
+
+| Necesidad | Encaje/cambio mínimo propuesto |
+|---|---|
+| Slot ordinario determinista | `executionKey = v1:slot:<scheduledAtUtc>`; guardar zona y fecha/hora local originales en `configurationSnapshot`. |
+| Recovery consolidado | `executionKey = v1:recovery:<firstSlotUtc>:<lastSlotUtc>`; snapshot inmutable incluye rango y lista de `slotKeys` cubiertos. El FK singular `recoveryOfExecutionId` no representa varios slots fuente; el snapshot permite trazabilidad inicial, y una tabla join `CampaignExecutionSlot` solo si se exige consulta relacional de cada slot. |
+| Retry de fallo terminal | `executionKey = v1:retry:<sourceExecutionId>:<retryOrdinal>`; `recoveryOfExecutionId` apunta a la Execution fuente. Asegurar unicidad de intento por Recipient/Execution, y no reusar Attempt/outcome terminal. |
+| Worker rezagado | Añadir `claimGeneration Int NOT NULL DEFAULT 0` a `CampaignExecution` como fencing token monotónico (o equivalente CAS robusto); cada toma/renovación incrementa generación y todas las escrituras del worker verifican owner, lease y generación vigentes. |
+| Retry diferido | La nueva Execution relacionada reutiliza `scheduledAt` como instante programado y `CampaignRecipientAttempt.attemptNumber` como ordinal; no se agrega `nextRetryAt`. Base/tope, jitter y clasificador contractual permanecen OPEN. |
+| Resultado externo | Se agregan outcome y retry class de Attempt independientes de `CampaignRecipientStatus`, además de `providerActivityId`; `ACCEPTED` significa aceptación API y no cambia Recipient a `SENT`. |
+
+La selección del mecanismo exacto de claim (transacción/row lock o actualización condicional atómica) debe validarse con la versión PostgreSQL/Prisma y prueba concurrente real. La unicidad actual `(campaignId, executionKey)` y ledger `(campaignId, purchaseSource, purchaseExternalId)` se conservan.
+
 ## 15. Estado del documento
 
 - **Status:** DRAFT
-- **Version:** 0.4
+- **Version:** 0.5
 - **Fuentes revisadas:** arquitectura, especificación funcional y `pec-api/prisma/schema.prisma`.
-- **Pendiente:** resolver OPENs de CF/Analytics, Emblue, estados Survey, calendario, PII, auditoría y operación antes de definir schema final.
+- **Pendiente:** resolver OPENs de CF/Analytics, Emblue, estados Survey, calendario, PII, auditoría y operación antes de habilitar ejecución productiva. Los cambios de Sprint 3.1A son locales y aditivos; no se aplicaron a PostgreSQL.
 - **Alcance documental:** este documento sigue definiendo el modelo logico; los modelos Prisma Campaign existen en checkout. No se ejecutan migraciones ni se modifica la base desde esta revision.
 
 ## 16. Historial de cambios
@@ -509,3 +526,28 @@ Esta sección es conceptual, no un schema ejecutable.
 | 0.4 | 2026-10-21 | Se documenta la duración inclusiva derivada de fechas calendario para validar frecuencias y la separación entre borrador editable y validación efectiva de programación. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Se documenta `America/Guayaquil` como default de Campaign para Ecuador, la persistencia explícita de `timeZone`, EndDate local inclusiva y la prohibición de inferir zona del navegador; recovery y conversión horaria permanecen OPEN. Estado DRAFT conservado. |
 | 0.4 | 2026-10-21 | Documenta recurrencias MONTHLY/QUARTERLY ancladas a StartDate, ajuste al último día sin drift y aritmética local previa a UTC, incluidos años bisiestos. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Formaliza recuperación consolidada, backlog 30 días, estados terminales inmutables, retry selectivo y semántica de `lastExecutionAt`; propone fencing, keys versionadas y campos/outcomes faltantes sin modificar Prisma. Estado DRAFT conservado. |
+| 0.5 | 2026-10-23 | Registra `activityId` como referencia de aceptación del adapter emBlue, sin mapeo persistido ni inferencia de entrega; `/activities/find` permanece OPEN. Estado DRAFT conservado. |
+
+### Actualización Sprint 3.0 — referencia de envío emBlue
+
+El response confirmado de `POST /v2.3/emails/send` contiene `activityId` string. El adapter lo devuelve como referencia de aceptación técnica junto con el código HTTP. No se persiste todavía: el schema actual no define una asignación aprobada de esta referencia por solicitud/recipient ni una reconciliación. `CampaignExecution.providerExecutionRef` permanece una posibilidad conceptual, no un mapeo implementado. No inferir entrega final desde `activityId`. Consulta `POST /activities/find` e idempotencia externa/persistida siguen OPEN. Estado DRAFT conservado.
+
+### Actualización Sprint 3.1A — persistencia y servicio interno
+
+El schema local agrega `CampaignExecution.claimGeneration` como generación monotónica de fencing y en `CampaignRecipientAttempt`: `attemptKey` interno único nullable para compatibilidad con filas previas, `providerOutcome`, `retryClass` y `providerActivityId`. Los enums nuevos no alteran `CampaignRecipientStatus`. La clave externa `idempotencyKey` no se utiliza ni se interpreta como garantía de emBlue.
+
+No se crean tablas adicionales. Los slots cubiertos por una recovery se conservan en `configurationSnapshot.execution.coveredSlots`; el retry se programa en una nueva Execution relacionada mediante `recoveryOfExecutionId` y `scheduledAt`, con nuevos Attempts y `attemptNumber` incrementado solo para la selección elegible. `ACCEPTED` conserva el `activityId`, pero no marca Recipient como `SENT`; `AMBIGUOUS` no admite retry class ni retry automático.
+
+El SQL 20261023000000_add_campaign_execution_controls fue aplicado manualmente en desarrollo segun confirmacion del usuario. prisma validate paso; prisma generate fallo inicialmente por EPERM y luego se completo correctamente. No se ejecuto prueba PostgreSQL con escrituras; DRAFT conservado.
+
+### Validación Sprint 3.1A.1 — esquema de desarrollo (2026-10-23)
+
+El usuario ejecutó manualmente el SQL de la migración en la base de desarrollo. Una transacción `READ ONLY` confirmó ambos enums y sus valores, `claim_generation INTEGER NOT NULL DEFAULT 0`, las cuatro columnas nullable de Attempt y el índice único sobre `attempt_key`, en coincidencia con `schema.prisma` y el SQL local. La fila no existe en `_prisma_migrations`; Prisma aún no reconoce la migración. No se ejecutó reconciliación ni migración. `prisma validate` pasa; `prisma generate` sigue fallando por `EPERM`. No se probaron escrituras ni concurrencia en esa base. Estado DRAFT conservado.
+
+El registro incompleto 20250907231907_add_user_establishment_table es metadato historico y no es bloqueo bajo Database-First; no se modifico.
+
+
+### Convención Database-First y estado (2026-10-23)
+
+Esta sección supersede notas anteriores que sugirieran prisma migrate resolve o consideraran _prisma_migrations un bloqueo. PostgreSQL es la fuente de verdad. Los cambios físicos se entregan como SQL revisable para ejecución manual; luego se sincroniza schema.prisma y se ejecuta prisma generate. No se aplican cambios con migrate dev/deploy/resolve, db push o migrate reset. La migración Campaign no figura en el historial Prisma, pero esto no afecta el ORM. El SQL de referencia está en prisma/manual-sql/campaign_execution_controls.sql. prisma validate, prisma generate, build NestJS y 84 pruebas unitarias Campaign pasaron después de regenerar el cliente. No se corrieron pruebas PostgreSQL con escrituras. Estado DRAFT conservado.
