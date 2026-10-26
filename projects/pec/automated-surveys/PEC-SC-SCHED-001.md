@@ -70,7 +70,7 @@ Los estados y frecuencias permanecen en inglés dentro de datos, eventos y lógi
 - **APPROVED:** Division, Department y Company son obligatorios para programar; filtros opcionales no bloquean DRAFT.
 - **MOCK:** el proveedor temporal solo contiene catálogos sintéticos y relaciones de demostración. No representa compras, clientes ni contratos reales CF/Analytics.
 - **DEFERRED:** no activar scheduler, resolver audiencia, crear recipients ni enviar correo cuando los catálogos MOCK sean el proveedor configurado. Este documento describe el diseño futuro y no autoriza su ejecución.
-- **OPEN:** `Survey.status = 1` no está confirmado como `PUBLISHED`; ningún flujo de scheduling puede considerarse habilitado por ese valor sin evidencia del módulo Surveys.
+- **APPROVED para Campaign:** la Survey requiere status=1, isPublic=true y archived=false; la ventana inclusiva debe cubrir todo el calendario local. status=1 aislado no basta; los blockers restantes siguen impidiendo activacion.
 - **OPEN:** la validación PostgreSQL del Sprint 2.4 sigue pendiente; ninguna sección de diseño constituye evidencia de migración/relaciones probadas en Neon.
 - **DEFERRED/BLOCKED:** Schedule y Resume no se habilitan mientras falten el estado técnico de publicación, contratos de audiencia real y las demás precondiciones; el catálogo MOCK no puede autorizar audiencia ni ejecución.
 
@@ -259,7 +259,7 @@ Cada ejecución procesa únicamente compras que cumplen **todas** estas condicio
 3. No han sido procesadas previamente por esa Campaign, deduplicando con clave lógica `campaignId + purchaseId/transactionId`.
 4. Tienen los datos requeridos para intentar envío según políticas de calidad/privacidad acordadas; los inválidos se contabilizan conforme regla OPEN y no se envían.
 
-`PostPurchaseOffset` es entero obligatorio >= 0 expresado en días. No hay filtro manual por rango de fechas de compra. El backend calcula la audiencia; Angular no recibe el universo de destinatarios.
+`PostPurchaseOffset` permanece en el esquema para campañas existentes. Las campañas nuevas usan 0 y el formulario no lo expone. Se prepara un rango opcional de fechas de compra (`purchaseDateFrom` / `purchaseDateTo`), inclusivo y con extremos independientes. El proveedor PostgreSQL provisional lo aplica sobre `invoice_business_date` junto con la fecha de evaluación. La migración está preparada pero no aplicada; el contrato equivalente con CF/BI sigue pendiente. El backend calcula la audiencia; Angular no recibe el universo de destinatarios.
 
 ### 8.2 Incrementalidad
 
@@ -682,3 +682,107 @@ Esto es infraestructura interna: no hay rutas públicas nuevas, llamada al `Embl
 ### Convención Database-First (2026-10-23)
 
 Las estructuras PostgreSQL que requiera scheduler/recovery deben especificarse en SQL revisable y ejecutarse manualmente. schema.prisma representa el esquema aplicado y Prisma Client se regenera con prisma generate; no se emplean comandos de migración Prisma. La migración Campaign se ejecutó manualmente en desarrollo según confirmación del usuario y el script está fuera de prisma/migrations. Las pruebas de concurrencia siguen pendientes de una base aislada. DRAFT conservado.
+
+### Sprint 3.1B — motor local sin activación automática
+
+`CampaignSchedulerService.runOnce()` consulta campañas vencidas en SCHEDULED/ACTIVE. Usa `CampaignTemporalService` para slots locales, conserva EndDate inclusiva y crea una Execution ordinaria o recovery consolidada con slots originales. El backlog máximo se controla con `CAMPAIGN_RECOVERY_MAX_BACKLOG_DAYS` (default 30; rango admitido 1–3650); si se excede genera warning y bloqueo sin avanzar cursor ni descartar slots. Materialización y avance de `nextExecutionAt` ocurren bajo transacción y lock Campaign; el key determinista incluye versión y slot/ventana. No hay Cron, activación en Helm ni envío. `runOnce` es dry-run por defecto. Recovery después de EndDate se limita a slots originalmente válidos; no genera slots posteriores. La concurrencia no se validó en PostgreSQL en esta sesión (suite omitida por entorno inaccesible). DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Registra el worker manual dry-run y recovery consolidada implementados; pruebas de concurrencia de Sprint 3.1B pendientes. DRAFT conservado. |
+
+### Sprint 3.1B.1 — validación de slots y recuperación en PostgreSQL
+
+La corrida aislada validó la serialización de ticks concurrentes, una sola Execution para el slot vencido, avance de `nextExecutionAt`, idempotencia ante un tick posterior (escenario de reinicio), Schedule y Suspend concurrentes con incrementos únicos de `version`, Resume después de EndDate con una única recovery y solo slots originalmente válidos, y rechazo de backlog mayor a 30 días sin modificar estado/cursor. No se materializaron envíos ni destinatarios. Resultado: 20/20 pruebas de integración PostgreSQL aprobadas; DRAFT conservado.
+## Registro de validación Sprint 3.1C
+
+Antes de Schedule/Resume se conserva el gate fail-closed. `GET /survey-campaigns/:campaignId/preflight` presenta las comprobaciones locales sin activar el scheduler. No existe resolución real de audiencia y el worker no debe invocar emBlue. Publicación, disponibilidad para el calendario completo, construcción de enlaces individuales y plantilla continúan bloqueos; no se crean ejecuciones ordinarias ni se altera estado como efecto del preflight.
+
+| 0.5 | 2026-10-23 | Añade resultado de preflight y mantiene bloqueada la programación efectiva ante dependencias OPEN; scheduler automático y despacho continúan desactivados. DRAFT conservado. |
+## Sprint 3.1C.1 — preflight y bloqueo de activación
+
+El preflight reporta comprobaciones locales y evidencia disponible, incluyendo la regla Campaign status=1, isPublic=true, archived=false y la disponibilidad para el calendario completo. OPEN no se trata como aprobacion. El enlace individual generado/consumido por Surveys y su parametrizacion Campaign siguen OPEN.
+
+No se añadió Cron ni conexión entre scheduler y emBlue. Ninguna página de audiencia se consulta ni se materializa en esta fase.
+
+| 0.5 | 2026-10-23 | Aclara checks acotados del preflight y mantiene sin activación las rutas de ciclo de vida ante contratos OPEN. DRAFT conservado. |
+
+
+## Sprint 3.1C.1 - publicacion de Survey para Campaign
+
+Regla funcional aprobada para Automated Survey Campaigns: una Survey es elegible solo si `status = 1`, `isPublic = true` y `archived = false`. `status=1` aislado no demuestra publicacion ni cambia el significado global de Survey. La ruta publica existente conserva su comportamiento, incluido el fallback para Surveys genericas; Campaign exige `isPublic=true` y no utiliza ese fallback.
+
+El gate lee `content.availableFrom` y `content.availableTo` si estan configurados. Valida formato e intervalo y verifica que el calendario Campaign completo, desde inicio local hasta fin local inclusivo, quede cubierto. Usa la zona IANA de Campaign para el calendario y el parser server-local ya usado por la ruta publica para interpretar los limites Survey. Mantener TZ consistente entre replicas del API es un requisito operativo; acceso a respuestas despues de `availableTo` y enlace individual Campaign siguen pendientes.
+
+Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aprobada; `SURVEY_CALENDAR_AVAILABILITY` distingue READY, BLOCKED y OPEN. Schedule y Resume vuelven a validar antes de mutar estado. No se modifica Prisma, no se cambia la ruta Surveys, y audiencia real, catalogos reales, plantilla y enlace individual siguen bloqueando la activacion. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1C.2 - gate de Survey antes de Schedule/Resume
+
+El gate Campaign usa `SurveyPublicationValidator` en preflight y antes de Schedule/Resume. Publicación requiere `status === 1`, `isPublic === true`, `archived === false`; `availableFrom/availableTo`, cuando existan, deben cubrir el calendario inclusivo programado. Una encuesta no elegible bloquea; una ventana inválida o insuficiente también bloquea. La disponibilidad incompleta se informa OPEN. Ninguna de estas verificaciones elimina bloqueos de URL individual, audiencia, plantilla o catálogos MOCK. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
+
+## Sprint 3.1C.3 - condición de fuente de audiencia
+
+El gate de disponibilidad no puede evaluar destinatarios mientras `CampaignAudienceProvider` no tenga una fuente y semántica verificadas. No existe evidencia actual de cursor, snapshot/as-of, orden estable, cutoff de cambios tardíos ni confirmación de compra. La interfaz con cursor y `pageSize` solo describe una costura interna, no autoriza una política de paginación o recuperación. Una lectura fallida nunca debe interpretarse como audiencia vacía. Schedule/Resume/Cron/dispatch siguen deshabilitados por la dependencia de audiencia real y catálogos reales; MOCK no es fuente de ejecución. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Precisa que paginación/cutoff y audiencia son dependencias contractuales, no comportamiento del scheduler confirmado. DRAFT conservado. |
+## Sprint 3.1C.4 - fuente de audiencia staging propuesta
+
+No se cambia el calendario ni se habilita scheduler. Como diseno futuro, cada materializacion de audiencia debe fijar el `load_id` completo antes de paginar, mantenerlo constante durante la lectura y registrar en el snapshot de Execution la version usada, una vez que DATA/API definan el campo. Un batch publicado debe permanecer inmutable. La paginacion debe ser estable y una carga que cambia/no esta publicada debe fallar cerrada, no convertirse en pagina vacia ni en elegibilidad cero. No asumir que un batch nuevo cambia retrospectivamente una Execution existente.
+
+Persisten OPEN el corte de elegibilidad, timezone de fecha de compra, retrasos/correcciones de fuente, retencion, politica de relectura durante recovery, unidad de destinatario y completitud de lote vacio. `bi_customer_purchases` y `bi_segmentation_catalog` son propuesta pendiente de BI; no se usa MOCK en ejecucion. Schedule/Resume/Cron/envios continuan bloqueados. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra dependencia de snapshot de audiencia estable para ejecuciones futuras; sin activar scheduler. DRAFT conservado. |
+## Sprint 3.1C.4.1 - unidad de trabajo de audiencia
+
+La unidad materializada de envio es factura por Campaign, no cliente ni linea de producto. Cuando una factura tenga varias lineas/productos/divisiones, el proveedor debe consolidar las filas y producir un Recipient si al menos una asignacion satisface filtros y elegibilidad. La identidad de deduplicacion es `(campaignId, invoice_source, invoice_external_id)`, que corresponde a la unicidad ya existente del Recipient. `load_id` debe fijarse para toda la Execution y persistirse en `configurationSnapshot` una vez integrado BI. No se activa scheduler ni despacho; elegibilidad, contacto y exclusion siguen siendo dependencias abiertas. v0.5 / DRAFT.
+## Sprint 3.1D - limite de ejecucion con staging provisional
+
+El proveedor PostgreSQL provisional aporta catalogos y candidatos sinteticos para validacion; no se usa para determinar destinatarios de una programacion efectiva. Preflight informa fuente/entorno y permite preview agregado, pero conserva `PROVISIONAL_DATA_SOURCE_NOT_APPROVED` y el bloqueo de audiencia real. Schedule/Resume siguen bloqueados mientras falten contrato BI validado, plantilla/enlace y demas condiciones vigentes.
+
+No se activo Cron, scheduler automatico ni despacho a emBlue. La prueba de trazabilidad usa fixtures sinteticos y recorre provider → Execution → Recipient → Attempt sin transporte de envio. Las politicas de recovery aprobadas no cambian. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Aclara que el staging local no habilita ejecucion ni envio real; DRAFT conservado. |
+
+## Sprint 3.1E - límite de invitaciones (2026-10-23)
+
+El servicio interno de correlación y el fixture de plantilla no se conectan a `CampaignSchedulerService`, `runOnce`, Schedule/Resume ni emBlue. Los bloqueos de audiencia, plantilla y enlace se mantienen. No se añade despacho ni reintento. La preparación de invitación futura deberá producir una sola relación por factura elegible y Campaign, conservar Campaign → Execution → Recipient → Attempt → ResponseCorrelation, y no procesar respuestas hasta acordar el enlace y el endpoint de submit.
+## Sprint 3.1F - Límite con scheduler (2026-10-23)
+
+El contrato de invitación y el guardado público no activan scheduler ni envíos. La emisión de token es un servicio interno para asociar a un Attempt y exige expiración explícita; ninguna tarea programada lo invoca en este cambio. Schedule/Resume y la elegibilidad real de audiencia mantienen sus bloqueos previos. v0.5 / DRAFT.
+## Sprint 3.1F.1 - precondición de compatibilidad Survey (2026-10-24)
+
+Schedule y Resume incluyen la elegibilidad de Survey de satisfacción como precondición: `version === 1` y `content.isQueja !== true`, además de publicación y disponibilidad vigentes. El incumplimiento mantiene la campaña bloqueada; no se agrega bypass ni se activa scheduler/Cron. No se ejecutaron pruebas de concurrencia con PostgreSQL en esta entrega; las reglas de ejecución permanecen sujetas a la validación aislada. v0.5 / DRAFT.
+## Sprint 3.1G-A - límites del modo de simulación (2026-10-24)
+
+`GET /survey-campaigns/:campaignId/execution-simulation` no crea Executions, no reclama leases, no avanza `nextExecutionAt`, no consume recovery y no es invocado por scheduler. Solo permite DRAFT y proveedores provisionales en no producción; retorna los blockers del preflight para dejar explícito que la audiencia provisional/plantilla no habilita Schedule ni Resume. No se agrega Cron ni cambio del calendario/recovery. v0.5 / DRAFT.
+
+
+## Sprint 3.1G-B - simplificación de conexión Campaign (2026-10-25)
+
+La simplificación del acceso PostgreSQL solo cambia la resolución interna de catálogos y audiencia. No altera precondiciones de publicación, audiencia BI aprobada, plantilla/enlace ni contactabilidad. El proveedor provisional no habilita Schedule, Resume, Cron ni envíos.
+
+Para la validación independiente de rama se requieren solo Project ID, Branch ID, propietario esperado de la base y credencial de API Neon (`CAMPAIGN_PROVISIONAL_NEON_PROJECT_ID`, `CAMPAIGN_PROVISIONAL_NEON_BRANCH_ID`, `CAMPAIGN_PROVISIONAL_NEON_DATABASE_OWNER`, `CAMPAIGN_PROVISIONAL_NEON_API_KEY`). El endpoint se extrae del host de `DATABASE_URL`, y la base y el rol de esa misma URL; estos datos de identidad no seleccionan proveedor ni crean otra conexión. **Registro de revisión:** v0.5, 2026-10-25. Se registra la decisión de conexión única/esquemas separados y selección automática protegida. Estado formal `DRAFT` conservado.
+
+
+## Sprint 3.1G-B.1 - auditoria de configuracion Campaign (2026-10-25)
+
+Inspeccion local de nombres de variables, sin leer ni publicar valores: `pec-api/.env` y `.env.local` contienen `DATABASE_URL` y `ENV`. `AppModule` carga globalmente `.env.local`, `.env.preprod`, `.env.prod` y `.env`; el guard lee `process.env`. No se encontro `DIRECT_URL` ni una identidad Neon reutilizable en esos archivos. `PROJECT_ID_GCS` identifica GCP y `API_KEY_STAR` pertenece a otra integracion; no son sustitutos de identidad Neon. El inventario local no prueba variables inyectadas externamente al proceso desplegado.
+
+En el checkout, `CampaignNeonTargetGuard` aun exige Project ID, Branch ID, propietario esperado y credencial API Neon. Ninguno aparece en los archivos locales. El error 503 se origina al faltar esa configuracion: el guard falla antes de llamar a la API de Neon y antes de leer el lote en `bi_integration`. Endpoint ID, base y rol se derivan del `DATABASE_URL`; no se requiere otra conexion ni un `DIRECT_URL`. No se modifico `DATABASE_URL`.
+
+No se retiro la verificacion de rama: `ENV` distingue el entorno PEC, pero no identifica una rama Neon; el hostname solo permite derivar el endpoint. La verificacion API Project/Branch/Endpoint y la comprobacion SQL posterior (base, esquema, rol, propietario y primary) siguen siendo controles distintos. El mecanismo equivalente no puede configurarse con los datos que hoy existen en los archivos inspeccionados. Dato pendiente para una lectura segura: una fuente confiable, ya disponible para NestJS, que relacione la conexion actual con el Project ID y Branch ID de desarrollo y permita verificar esa relacion en Neon. Hasta resolverlo, la lectura funcional falla cerrada. Los SPECS permanecen v0.5 / DRAFT.
+## Separación de lecturas y ejecución de campañas (2026-10-25)
+
+La lectura de catálogos, preview o simulación desde el proveedor provisional no constituye autorización para Schedule, Resume, scheduler ni envíos. Estas operaciones permanecen sujetas a sus precondiciones funcionales independientes. Campaign accede a BI provisional mediante `DatabaseService` y `DATABASE_URL`; la API administrativa Neon no forma parte del contrato de lectura objetivo. La autorización confiable de destino se rige por ARCH/INTEG y no por la máquina de estados de campaña.
+
+Schedule, Resume, ejecución automática y despacho siguen bloqueados mientras falten los contratos funcionales requeridos. Estado formal `DRAFT`; versión v0.5.
+
+## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
+
+Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
+
+`GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
+
+Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.

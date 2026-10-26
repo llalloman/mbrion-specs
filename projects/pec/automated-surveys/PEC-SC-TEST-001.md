@@ -113,7 +113,7 @@ Una suite puede pertenecer a más de una clasificación; usar una categoría pri
 | ID | Categoría primaria / adicional | Escenario y precondiciones | Resultado esperado | Prioridad | Evidencia requerida |
 |---|---|---|---|---|---|
 | TST-SURVEY-01 | Unit + Integration + E2E | Schedule con Survey existente `PUBLISHED`, accesible y elegible. | Campaign puede programarse si el resto de requisitos es válido. | P0 | Contrato Survey real, resultado del schedule y DB. |
-| TST-SURVEY-02 | Unit + Integration | Survey inexistente, archivada, no publicada o fuera de disponibilidad al intentar schedule. | Rechaza con error estable y claro; no crea Execution ni altera calendario. Guardar DRAFT con Survey existente no publicada sigue la regla de API-001. | P0 | Response/error code, estado DB y regla `PUBLISHED` mapeada. **OPEN** campo técnico. |
+| TST-SURVEY-02 | Unit + Integration | Survey inexistente, privada, inactiva, archivada o con ventana fuera de calendario al intentar Schedule. | Rechaza con error estable; no crea Execution ni cambia calendario. Guardar DRAFT sigue permitido. | P0 | Verificar campos y ventana Campaign. |
 | TST-SEG-01 | Unit + Integration | Schedule sin Division, Department o Company, individualmente y en conjunto. | Rechaza; ninguna selección obligatoria se interpreta como “sin filtro”. | P0 | Tabla de validación y request/response. |
 | TST-SEG-02 | Unit | Multiselect con varios valores en el mismo grupo. | Los valores de ese grupo se combinan OR; un optional vacío no restringe. | P0 | Casos parametrizados con expected purchase IDs sintéticos. |
 | TST-SEG-03 | Unit + Integration | Combinar Division, Department, Company y opcionales. | Los grupos diferentes se combinan AND, manteniendo OR intra-grupo. | P0 | Dataset pequeño conocido y consulta/resultado explícito. |
@@ -218,7 +218,7 @@ Estas pruebas son evidencia de contrato interno/UI/validación, no compatibilida
 | DEC-SC-04–DEC-SC-07, RB-101–RB-103 | ARCH-001, INTEG-001, API-001 | T25-03: seleccionar provider explícitamente, bloquear MOCK en producción y probar error/no fallback; preservar DTO Angular. |
 | DEC-SC-08–DEC-SC-10, RB-007–RB-018, RB-104 | FOUND-001, DATA-001, API-001 | T25-04: probar opciones, relaciones sintéticas, búsqueda/multiselect, limpieza padre-hijo y validación backend; DRAFT incompleto y campos obligatorios al programar. |
 | DEC-SC-11, RB-105 | ARCH-001, FOUND-001, SCHED-001, INTEG-001 | T25-05: comprobar que MOCK no dispara preview real, execution, recipient ni envío; funcionalidad queda DEFERRED. |
-| DEC-SC-12, RB-006 / OPEN-API-01 | FOUND-001, API-001, ARCH-001 | T25-06: determinar estado técnico de publicación Survey antes de habilitar scheduling. |
+| DEC-SC-12, RB-006 / OPEN-API-01 | FOUND-001, API-001, ARCH-001 | Cerrado para Campaign: probar conjuncion de campos y cobertura de ventana, sin nuevo estado global PUBLISHED. |
 | DEC-SC-13, OPEN-TEST-03 | TEST-001, DATA-001 | T25-07: completar verificación PostgreSQL en rama/base aislada y con fixtures sintéticos no destructivos. |
 | OPEN de Analytics/Emblue | INTEG-001, API-001 | T25-08: incorporar contratos reales aprobados y contract tests; sin endpoints o jerarquías inventados. |
 
@@ -281,7 +281,7 @@ Estas pruebas son requisitos para el sprint de implementación; no se ejecutaron
 | OPEN-TEST-04 | Contrato real, ambiente sandbox y datos sintéticos de CF/Analytics. | Contract/source integration queda pendiente. |
 | OPEN-TEST-05 | Credenciales no productivas, templates, sandbox y contratos externos restantes de Emblue; la llamada de envío individual v2.3 está confirmada parcialmente. | El adapter tiene pruebas unitarias mock; contract/send real, webhook y reconciliación no se certifican sin estas dependencias. |
 | OPEN-TEST-06 | Permisos específicos de recipients/operaciones; el acceso Campaign básico está aprobado solo para ADMIN/SUPERADMIN efectivos y alcance multiempresa. | Probar rol efectivo, denegación a otros roles, independencia de empresa activa y no regresión de otros módulos. |
-| OPEN-TEST-07 | Estado técnico `PUBLISHED`; conversión local→UTC/DST y reglas para otras zonas. | Mantener Schedule/Resume bloqueados; no inferir `PUBLISHED` de `Survey.status = 1`. Catch-up, downtime, Suspend/Resume, EndDate y finalización v1 quedan cerrados por políticas 2.9.1. |
+| OPEN-TEST-07 | TZ local uniforme entre replicas API, acceso despues de availableTo; conversion local a UTC/DST y reglas para otras zonas. | Probar la conjuncion Campaign status=1, isPublic=true, archived=false y cobertura del calendario. Schedule/Resume siguen bloqueados por audiencia/catalogos/plantilla. |
 | OPEN-TEST-08 | Reconciliación/idempotencia Emblue, firma/replay/event ID de webhook, códigos para clasificar errores, y reglas de completitud de lectura/fallo parcial. | Probar no-resend ante ambiguity; contrato/reconciliación externos quedan bloqueados. `FAILED` terminal no se reabre. |
 | OPEN-TEST-09 | Umbral CI de coverage y calidad, métricas de contract tests y Quality Gate PEC aplicable. | DoD requiere usar Quality Gate vigente sin inventar porcentaje nuevo. |
 | OPEN-TEST-10 | Validación PostgreSQL aislada de `executionKey`, `claimGeneration`, recuperación de reservas/Attempts y constraints nuevas. `nextRetryAt` no se requiere: retry queda en `CampaignExecution.scheduledAt`. | Las pruebas unitarias mock verifican CAS/fencing y selección de retry; falta confirmar concurrencia, unique index y transacciones en PostgreSQL local aislado, sin limpiar datos existentes. |
@@ -373,3 +373,130 @@ La validación encontró y corrigió tres defectos limitados a Campaign: el guar
 Validación posterior: 9 suites Campaign, 108 pruebas aprobadas (incluye las 15 PostgreSQL); `npm run build` aprobado; ESLint focalizado aprobado. La suite general, excluyendo la integración ejecutada separadamente, reportó 95 suites (72 aprobadas, 23 fallidas) y 1.127 pruebas (1.066 aprobadas, 61 fallidas). Los fallos se ubican en suites ajenas a Campaign: errores de compilación/resolución, dependencias no provistas y aserciones en Complaints, Product, Reports, Metrics, Surveys report, Country, Configs, Auth/Keycloak y Notifications. No se hizo una corrida comparable del commit base; no se atribuyen como preexistentes ni se afirma causalidad de Campaign.
 
 Para esta fase, la verificación de PostgreSQL aislado y concurrencia queda satisfecha. Permanecen fuera de alcance y OPEN los flujos de scheduler, envío automático, `/activities/find`, idempotencia externa de emBlue, entrega final, publicación real de Survey y la protección de despliegue `RUN_MIGRATIONS=true`. SPECS conservan v0.5 / DRAFT.
+
+### Sprint 3.1B — evidencia de pruebas de checkout
+
+`pnpm exec jest src/survey-campaigns --runInBand` reportó 10 suites aprobadas, 108 pruebas aprobadas, 1 suite de integración omitida y 17 pruebas omitidas. El build NestJS y ESLint focalizado finalizaron correctamente. Los tests unitarios cubren lifecycle, blockers, dry-run y backlog; los tests PostgreSQL están en `survey-campaigns.integration.spec.ts`, pero no se ejecutaron aquí. Docker Engine denegó acceso y no había listener en `localhost:5432`; no se intentó Neon. Por tanto, no hay evidencia de concurrencia/reinicio PostgreSQL para 3.1B. No se enviaron correos y el scheduler no invoca emBlue. Mantener criterios PostgreSQL abiertos hasta una corrida aislada.
+
+| 0.5 | 2026-10-23 | Registra resultados de build, lint y 108 pruebas unitarias Campaign; 17 pruebas de integración omitidas por falta de PostgreSQL local accesible. DRAFT conservado. |
+
+### Sprint 3.1B.1 — cobertura PostgreSQL adicional preparada (2026-10-23)
+
+Se amplió `survey-campaigns.integration.spec.ts` con fixtures identificados por `runTag` sintético y limpieza por IDs: Schedule/Suspend concurrentes con verificación de `version`, Resume posterior a EndDate con una recovery que contiene solo slots originales y `nextExecutionAt = null`, y rechazo de Resume cuando el backlog supera 30 días sin alterar estado/cursor. El test de ticks concurrentes ahora también simula un tick posterior al reinicio y verifica que el cursor avanzado evita una Execution duplicada. Estas pruebas compilan, pero no fueron ejecutadas contra PostgreSQL.
+
+La suite local `pnpm exec jest src/survey-campaigns --runInBand` pasó 108 pruebas en 10 suites; 20 pruebas de la única suite PostgreSQL quedaron omitidas. Build NestJS y ESLint focalizado del archivo de integración pasaron. Docker service `com.docker.service` figura Stopped (Manual), el engine rechazó la consulta del contenedor y no hay listener en 5432; no se inició Docker ni se modificó ningún servicio. `psql` no está disponible en PATH. Identidad/configuración del contenedor no verificables en esta sesión. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Añade cobertura PostgreSQL preparada para concurrencia de lifecycle, Resume al vencer EndDate, límite de backlog y repetición de tick tras reinicio; ejecución pendiente hasta disponer del contenedor aislado. DRAFT conservado. |
+
+### Sprint 3.1B.1 — resultado PostgreSQL y regresión Campaign (2026-10-23)
+
+Resultado verificado: `pnpm exec jest src/survey-campaigns --runInBand` con `CAMPAIGN_TEST_DATABASE_URL` temporal, solo en el proceso, dirigido a `pec_campaigns_test`: 11 suites y 128/128 pruebas aprobadas; la integración PostgreSQL aporta 20/20. `pnpm run build` aprobado. ESLint focalizado aprobado para los servicios lifecycle/scheduler/execution, controller y la prueba PostgreSQL. `git diff --check` aprobado en `pec-api` y `mbrion-specs`.
+
+El test de Suspend falló primero porque el fixture usaba una hora fija que hacía vencer el lease. Se cambió el fixture a tiempos relativos; luego la prueba aislada y la suite completa pasaron. Las consultas de limpieza confirmaron cero registros de prueba en Campaign, Execution, Recipient, Attempt, ResponseCorrelation, Survey, Enterprise, User y Country. No quedan defectos de prueba conocidos en esta suite. No se atribuyen resultados a la suite general de Jest.
+
+| 0.5 | 2026-10-23 | Registra 20/20 pruebas PostgreSQL y 128/128 pruebas Campaign, build/lint focalizados y limpieza verificada de fixtures sintéticos; DRAFT conservado. |
+## Registro de validación Sprint 3.1C
+
+Se añadieron verificaciones unitarias de preflight: Survey activa no equivale a publicada, se muestran bloqueos de MOCK/audiencia/plantilla y el endpoint HTTP queda bajo `Read Campaign` (incluye denegación a roles no autorizados). Resultado local: 10 suites / 110 pruebas unitarias Campaign aprobadas (se excluyó explícitamente `survey-campaigns.integration.spec.ts`), build NestJS aprobado y ESLint focalizado aprobado. No se ejecutó PostgreSQL en este incremento, ni se accedió a Neon. La consulta no persiste cambios ni llama emBlue.
+
+| 0.5 | 2026-10-23 | Añade escenarios de preflight, preservación de bloqueos y autorización HTTP; no se usan servicios externos, Neon ni correos. DRAFT conservado. |
+## Sprint 3.1C.1 — pruebas independientes de contrato
+
+Se añaden pruebas unitarias puras para detectar variables requeridas ausentes, claves no declaradas y escapar valores para contexto de texto HTML. Resultado: `pnpm exec jest src/survey-campaigns --runInBand --no-coverage --testPathIgnorePatterns=integration.spec.ts`, 11 suites y 113 pruebas aprobadas. Build NestJS y ESLint focalizado también aprobados. No se ejecutó la suite PostgreSQL. No se analiza la sintaxis de placeholders de un proveedor, no se renderiza una plantilla y no se sanea HTML completo. El preflight conserva publicación/URL/audiencia/plantilla OPEN o BLOCKED; una interfaz o fixture MOCK no las convierte en READY.
+
+Pruebas de aceptación aún necesarias: publicación confirmada versus estado activo; ventana de Campaign cubierta por disponibilidad Survey; enlace final en navegador/API; paginación y estabilidad de audiencia; elegibilidad y duplicados; consentimiento/supresión/correo; render de plantilla aprobada, enlace individual y correlación opaca. Todas deben usar datos sintéticos o mocks. Pruebas contractuales externas esperan el contrato oficial de Data-Lab y de plantilla.
+
+| 0.5 | 2026-10-23 | Registra pruebas independientes de validación de variables/escape y criterios pendientes por integración; no se hacen llamadas externas ni envíos. DRAFT conservado. |
+
+
+## Sprint 3.1C.1 - publicacion de Survey para Campaign
+
+Regla funcional aprobada para Automated Survey Campaigns: una Survey es elegible solo si `status = 1`, `isPublic = true` y `archived = false`. `status=1` aislado no demuestra publicacion ni cambia el significado global de Survey. La ruta publica existente conserva su comportamiento, incluido el fallback para Surveys genericas; Campaign exige `isPublic=true` y no utiliza ese fallback.
+
+El gate lee `content.availableFrom` y `content.availableTo` si estan configurados. Valida formato e intervalo y verifica que el calendario Campaign completo, desde inicio local hasta fin local inclusivo, quede cubierto. Usa la zona IANA de Campaign para el calendario y el parser server-local ya usado por la ruta publica para interpretar los limites Survey. Mantener TZ consistente entre replicas del API es un requisito operativo; acceso a respuestas despues de `availableTo` y enlace individual Campaign siguen pendientes.
+
+Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aprobada; `SURVEY_CALENDAR_AVAILABILITY` distingue READY, BLOCKED y OPEN. Schedule y Resume vuelven a validar antes de mutar estado. No se modifica Prisma, no se cambia la ruta Surveys, y audiencia real, catalogos reales, plantilla y enlace individual siguen bloqueando la activacion. Evidencia local 2026-10-23: Campaign unitarias sin PostgreSQL, 11 suites / 122 pruebas aprobadas; SurveysService, 1 suite / 58 pruebas aprobadas; build NestJS aprobado. ESLint en CampaignLifecycleService, sus pruebas, helper de disponibilidad y HTTP Campaign aprobado. ESLint del archivo SurveysService reporta hallazgos de estilo/uso fuera del diff; el import `format` ya estaba sin uso en HEAD. No se ejecutaron pruebas PostgreSQL, no se accedio a Neon, no se envio correo ni se activo Cron. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1C.2 - cobertura del validador concreto
+
+Pruebas para regla activa/pública/no archivada, inactiva, privada, archivada, genérica privada, fecha disponible futura, fecha vencida, calendario fuera de `availableTo`, configuración incompleta y revalidación al reanudar. También se verifica que enlace individual permanezca OPEN y que audiencia/plantilla/catálogos MOCK sigan bloqueando operaciones. Evidencia local 2026-10-23: 34 pruebas focalizadas aprobadas, build NestJS aprobado y ESLint focalizado aprobado. No se ejecutaron pruebas de integración PostgreSQL, DDL/DML, Cron ni envíos. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
+
+## Sprint 3.1C.3 - aceptación futura de proveedor CF/Data-Lab
+
+No se agregan pruebas de contrato externo porque no existe especificación verificable y no se hicieron llamadas a servicios ni consultas de datos. Antes de aceptar un adapter real deberán existir fixtures sintéticos/redacted que prueben IDs/relaciones de cada catálogo, filtro por padres, paginación estable/repetida, límites de página y errores de fuente; resolución de compra con clave/source/type, fecha y offset; correo ausente/inválido; duplicados; exclusiones/consentimiento; alcance Company multiempresa y minimización de PII. Verificar que fallo de fuente no se transforme en página vacía, que MOCK no habilite programación y que no se llame emBlue. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Añade criterios de aceptación de contrato para catálogos y audiencia, sin pruebas externas ni datos personales. DRAFT conservado. |
+## Sprint 3.1C.4 - pruebas de contrato BI propuestas
+
+No se ejecutaron pruebas externas ni de base de datos para este diseno. Preparar, tras confirmacion del esquema, fixtures sinteticos con identificadores y correos reservados de ejemplo; nunca cargar registros reales. Casos de contrato: claves estables, IDs como strings opacos, relaciones padre-hijo devueltas por BI (sin asumir jerarquia), vigencia/activo, division y departamento obligatorios, empresa/formato/local/subclasificacion opcionales, OR por filtro y AND entre filtros, deduplicacion segun unidad aprobada, fechas/cutoff, correo ausente/invalido, filtro de supresion/consentimiento, paginas repetibles con mismo load_id, cursor invalido/expirado, fuente incompleta y fallo de lectura.
+
+Probar la publicacion atomica de los dos datasets y que un batch vacio solo se acepte con manifiesto/senal de completitud acordada. Verificar que respuesta Angular no contiene PII, que el adapter rechaza batch sin publicar y que no llama a emBlue ni activa scheduler. El DDL sigue siendo propuesta no ejecutada. SPECS v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Anade plan de pruebas sinteticas de contrato BI; no se ejecutaron pruebas ni se usaron datos reales. DRAFT conservado. |
+## Sprint 3.1C.4.1 - cobertura de factura consolidada
+
+Agregar pruebas sinteticas que cubran: una factura con varios productos y divisiones elegibles crea exactamente un candidato; mezcla de filas elegibles/no elegibles sigue creando uno; ninguna fila elegible crea cero; productos repetidos no duplican; facturas diferentes del mismo customer crean dos candidatos; misma factura repetida en Campaign diferente es independiente; origen distinto con igual numero de factura no colisiona; source/id vacios o inestables se rechazan; agrupacion no divide una factura entre paginas. Verificar que cada Recipient conserva source + invoice ID, que los Attempts siguen enlazados por FK y que `load_id` queda en el snapshot de Execution al implementar el adapter. Reglas de contacto/supresion requieren casos una vez aprobadas. No se ejecutaron pruebas en este cambio de diseno. v0.5 / DRAFT.
+## Sprint 3.1D - evidencia PostgreSQL provisional
+
+Se ejecutaron `campaign-postgres-staging.integration.spec.ts` y `survey-campaigns.integration.spec.ts` contra el contenedor local aislado `pec_campaigns_test`, propietario/rol `campaign_test`, PostgreSQL 15.4, tras validar URL, identidad del servidor y presencia de las tablas. Resultado: 2 suites y 27/27 pruebas aprobadas. Cubren los seis catalogos, filtro de padres, OR/AND, consolidacion de facturas antes de paginar, facturas distintas del mismo cliente, igual numero con distinto origen, preview sin PII, correos ausentes/invalidos, referencias incompatibles, fecha invalida, cursor ligado al snapshot, inconsistencias y recorrido sintetico Campaign → Audience → Execution → Recipient → Attempt. No se invoco emBlue.
+
+Fixtures de test usan UUID `load_id` por ejecucion y cleanup limitado a IDs creados por la suite. Los seeds iniciales son 8 filas de catalogo y 10 filas de compra con IDs `MOCK-*` y correos reservados `example.test`; no contienen datos reales. No se uso Neon ni Prisma Migrate. La evidencia valida esta implementacion local, no un contrato BI externo. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Registra pruebas PostgreSQL locales 27/27 y aislamiento de fixtures; DRAFT conservado. |
+
+## Sprint 3.1D.1 - aislamiento de destino
+
+Las pruebas PostgreSQL siguen apuntando unicamente a `pec_campaigns_test` y a los scripts `bi_campaign_staging_provisional_local_test.sql` / `_local_test_seed.sql`. Los scripts sin sufijo quedaron destinados a desarrollo Neon; no son parte de la suite y no se ejecutaron. `NODE_ENV=production` se mantiene como destino rechazado. DRAFT conservado.
+
+## Sprint 3.1E - pruebas aisladas de invitación (2026-10-23)
+
+Pruebas unitarias cubren emisión opaca y almacenamiento hash, Attempt inexistente, expiración, URL inválida, enlace consumido/repetido, Survey coincidente y asociación de resultado una sola vez. El fixture HTML valida HTTPS y escape de atributo. No se usaron Neon, datos de clientes, endpoints externos ni emBlue. Build NestJS y ESLint focalizado forman parte de la validación de entrega. Las pruebas no prueban el flujo público extremo a extremo, que sigue bloqueado por la incompatibilidad de rutas/submit documentada en API-001. v0.5 / DRAFT.
+## Sprint 3.1F - Evidencia y cobertura de invitación (2026-10-23)
+
+Cobertura unitaria: emisión con hash y expiración, relación token/Survey, rechazo de expiración/consumo, respuesta guardada con asociación y pérdida de carrera por compare-and-set; Angular prueba apertura y envío mediante el token reutilizando SurveyJS. Se prepara una prueba PostgreSQL concurrente con fixtures sintéticos en la suite protegida CAMPAIGN_TEST_DATABASE_URL: exactamente una respuesta debe confirmar, un solo SurveyResult queda persistido y la correlación queda consumida. No se ejecuta si no existe la URL local aislada validada. Los resultados de ejecución se mantienen separados de este criterio preparado. v0.5 / DRAFT.
+
+Evidencia de ejecución Sprint 3.1F: Jest Campaign focalizado aprobó 13 suites / 138 pruebas; la prueba Angular de FormComponent aprobó 1 suite / 9 pruebas. Build NestJS y ESLint focalizado aprobaron. La suite PostgreSQL protegida no se ejecutó: `CAMPAIGN_TEST_DATABASE_URL` no estaba configurada, por lo que no hubo conexión ni escrituras. La prueba concurrente queda preparada, no validada contra PostgreSQL en esta entrega. El build Angular a su carpeta `dist` habitual encontró EPERM al intentar retirar `dist/fuse/3rdpartylicenses.txt`; no se eliminó el archivo ni se detuvo ningún proceso. El build de producción a una carpeta de salida temporal terminó correctamente (109.660 s), con advertencias preexistentes de presupuesto de bundle, dependencias CommonJS y hojas de estilo externas ausentes. El workspace Angular no tiene target `lint`. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1F.1 - validación transaccional pendiente (2026-10-24)
+
+En esta sesión, la prueba unitaria de `CampaignInvitationCorrelationService` pasó: 1 suite / 9 pruebas. La suite PostgreSQL de Campaign se omitió: 1 suite / 7 pruebas omitidas porque `CAMPAIGN_TEST_DATABASE_URL` no estaba definida. No se verificaron concurrencia, rollback ni aislamiento en PostgreSQL real. Docker Engine respondió acceso denegado; `com.docker.service` figura detenido. Aunque el puerto loopback 5432 tiene listener `com.docker.backend`, no se pudo inspeccionar el contenedor que atiende ese puerto ni verificar su configuración; por ello no se conectó ni se configuró URL alguna. No se usó Neon y no hubo escrituras. v0.5 / DRAFT.
+## Sprint 3.1F.1 - compatibilidad y evidencia de pruebas (2026-10-24)
+
+Se cubren Survey v1 elegible, versión 2, encuesta que declara `isQueja`, versión desconocida, preflight bloqueado, Schedule/Resume rechazados y apertura/guardado de invitación. Resultado de la suite unitaria focalizada: 14 suites, 157 pruebas aprobadas. Build NestJS: aprobado. ESLint sobre toda `src/survey-campaigns` no pasa por discrepancias Prettier de CRLF en archivos de la carpeta; no se atribuyen automáticamente a este cambio. La prueba PostgreSQL protegida no se ejecutó: `CAMPAIGN_TEST_DATABASE_URL` no estaba configurada y Docker Engine no permitió verificar el contenedor. No hubo conexión a Neon ni escrituras. Concurrencia, rollback y reuso concurrente del token siguen sin certificación real. v0.5 / DRAFT.
+## Sprint 3.1G-A - cobertura de simulación sin envíos (2026-10-24)
+
+Pruebas unitarias cubren: deduplicación de factura repetida entre páginas, diferentes facturas, validez de snapshot, rechazo de providers MOCK/no configurados, bloqueo en producción y para estados no DRAFT, gates de Survey, descarte de email inválido, ausencia de PII en respuesta y side effects reportados en cero. Prueba HTTP verifica autorización por lectura Campaign. Build NestJS y ESLint focalizado (reglas distintas de Prettier) aprobados; la suite completa Campaign se registra tras la corrida. No se ejecutó PostgreSQL aislado, Neon, emBlue ni scheduler. La simulación no prueba persistencia, rollback, concurrency ni vínculo ResponseCorrelation/SurveyResult; se requiere PostgreSQL local verificado para esas pruebas. SPECS v0.5 / DRAFT.
+Evidencia Sprint 3.1G-A: suite unitaria Campaign aprobada con 15 suites / 165 pruebas; build NestJS aprobado; ESLint focalizado aprobado al desactivar únicamente la regla Prettier que detecta formato CRLF en el checkout. La suite PostgreSQL no se ejecutó en esta fase; no se usaron Neon, emBlue ni scheduler. Resultado de esta simulación no prueba persistencia ni atomicidad. Estado DRAFT conservado.
+
+
+## Sprint 3.1G-B - simplificación de conexión Campaign (2026-10-25)
+
+Pruebas locales verifican selección por entorno, rechazo de producción/entorno desconocido, identidad Neon fail-closed y consultas del proveedor mediante los nombres cualificados del esquema `bi_integration`. Las pruebas unitarias/build no prueban la lectura funcional de Neon. No se consultó Neon en este cambio porque la identidad de la rama no estaba confirmada; las pruebas de integración Neon siguen condicionadas a esa verificación. No hubo DDL, DML, migraciones, scheduler ni envíos.
+
+Para la validación independiente de rama se requieren solo Project ID, Branch ID, propietario esperado de la base y credencial de API Neon (`CAMPAIGN_PROVISIONAL_NEON_PROJECT_ID`, `CAMPAIGN_PROVISIONAL_NEON_BRANCH_ID`, `CAMPAIGN_PROVISIONAL_NEON_DATABASE_OWNER`, `CAMPAIGN_PROVISIONAL_NEON_API_KEY`). El endpoint se extrae del host de `DATABASE_URL`, y la base y el rol de esa misma URL; estos datos de identidad no seleccionan proveedor ni crean otra conexión. **Registro de revisión:** v0.5, 2026-10-25. Se registra la decisión de conexión única/esquemas separados y selección automática protegida. Estado formal `DRAFT` conservado.
+
+
+## Sprint 3.1G-B.1 - auditoria de configuracion Campaign (2026-10-25)
+
+Inspeccion local de nombres de variables, sin leer ni publicar valores: `pec-api/.env` y `.env.local` contienen `DATABASE_URL` y `ENV`. `AppModule` carga globalmente `.env.local`, `.env.preprod`, `.env.prod` y `.env`; el guard lee `process.env`. No se encontro `DIRECT_URL` ni una identidad Neon reutilizable en esos archivos. `PROJECT_ID_GCS` identifica GCP y `API_KEY_STAR` pertenece a otra integracion; no son sustitutos de identidad Neon. El inventario local no prueba variables inyectadas externamente al proceso desplegado.
+
+En el checkout, `CampaignNeonTargetGuard` aun exige Project ID, Branch ID, propietario esperado y credencial API Neon. Ninguno aparece en los archivos locales. El error 503 se origina al faltar esa configuracion: el guard falla antes de llamar a la API de Neon y antes de leer el lote en `bi_integration`. Endpoint ID, base y rol se derivan del `DATABASE_URL`; no se requiere otra conexion ni un `DIRECT_URL`. No se modifico `DATABASE_URL`.
+
+No se retiro la verificacion de rama: `ENV` distingue el entorno PEC, pero no identifica una rama Neon; el hostname solo permite derivar el endpoint. La verificacion API Project/Branch/Endpoint y la comprobacion SQL posterior (base, esquema, rol, propietario y primary) siguen siendo controles distintos. El mecanismo equivalente no puede configurarse con los datos que hoy existen en los archivos inspeccionados. Dato pendiente para una lectura segura: una fuente confiable, ya disponible para NestJS, que relacione la conexion actual con el Project ID y Branch ID de desarrollo y permita verificar esa relacion en Neon. Hasta resolverlo, la lectura funcional falla cerrada. Los SPECS permanecen v0.5 / DRAFT.
+## Separación de pruebas de lectura y de escritura (2026-10-25)
+
+Las consultas de catálogos en desarrollo son lecturas mediante el `DatabaseService` y la `DATABASE_URL` de PEC, permitidas solo tras autorizar el destino según ARCH/INTEG. La API administrativa Neon no debe ser una dependencia del endpoint en la arquitectura objetivo. Esto no cambia la regla para pruebas transaccionales: cualquier fixture con INSERT/UPDATE/DELETE/concurrencia usa PostgreSQL local aislado o una rama Neon dedicada a pruebas; nunca la rama de desarrollo compartida. La URL de pruebas no puede sustituir silenciosamente `DATABASE_URL` en el proceso normal.
+
+Las pruebas unitarias no demuestran conectividad funcional con Neon. La prueba real de lectura se informa por separado y no debe escribir datos. Estado formal `DRAFT`; versión v0.5.
+
+## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
+
+Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
+
+`GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
+
+Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.

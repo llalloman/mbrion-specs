@@ -397,3 +397,128 @@ El servicio interno de ejecución registra `DISPATCHING`, `ACCEPTED`, `REJECTED`
 ### Convención Database-First (2026-10-23)
 
 Las integraciones Campaign no administran DDL. Los cambios físicos se entregan como SQL revisable y se ejecutan manualmente; Prisma Client se regenera desde el modelo sincronizado. La ausencia de una fila en _prisma_migrations no bloquea el uso del adapter. DRAFT conservado.
+
+### Sprint 3.1B — barrera de integraciones
+
+No se conecta `EmblueService` a `CampaignSchedulerService`. La evaluación de readiness falla cerrada si el proveedor de catálogos es MOCK, no existe resolver de audiencia real, la publicación de Survey no está demostrada o el contrato de plantilla no está verificado. Por ello, el worker no materializa ejecuciones con estas dependencias sin resolver. No se invoca API externa ni se crea Recipient. La relación de aceptación `activityId` vs. procesamiento/entrega sigue siendo la documentada en v0.5.
+
+| 0.5 | 2026-10-23 | Registra que el scheduler no invoca emBlue ni audiencia; las dependencias sin verificar impiden materializar ejecuciones. DRAFT conservado. |
+
+### Sprint 3.1B.1 — verificación de no despacho
+
+La suite de PostgreSQL y las 108 pruebas unitarias Campaign terminaron sin invocar emBlue; el scheduler conserva solo materialización de ledger y los tests verifican `sentCount = 0`. No se realizaron requests a endpoints externos, no se enviaron correos ni se usaron destinatarios reales. Estado v0.5 / DRAFT.
+## Registro de validación Sprint 3.1C
+
+No se encontró en el checkout un módulo/cliente de Analytics o Data-Lab que resuelva audiencia Campaign, compras, paginación y elegibilidad. Los servicios PEC de cliente/colaborador son consultas individuales y no acreditan ese contrato. `AnalyticsCampaignCatalogProvider` es un stub sin URL, autenticación ni esquema real. Las plantillas existentes corresponden a notificaciones ajenas a Campaign; emBlue `sendEmail()` acepta HTML/actionId pero no define plantilla aprobada ni variables Campaign. No se realizaron llamadas externas ni envíos.
+
+| 0.5 | 2026-10-23 | Registra la búsqueda de integraciones y plantillas; audiencia, catálogos Analytics y plantilla Campaign permanecen OPEN, sin contratos inventados. DRAFT conservado. |
+## Sprint 3.1C.1 — inventario, responsables y criterios de aceptación
+
+| Integración | Evidencia disponible | Responsable que debe confirmar | Pendiente para aceptar |
+|---|---|---|---|
+| Publicacion Survey | Regla aprobada Campaign: status=1, isPublic=true, archived=false; fechas en content; ruta /surveys/public/:id/:local conserva el fallback generico. Campaign no usa ese fallback. | Equipo Surveys | Alinear TZ local de replicas API; confirmar acceso a respuestas despues de availableTo y verificar enlace individual Campaign. |
+| Catálogos CF/Analytics | `CampaignCatalogProvider` implementado para MOCK; `AnalyticsCampaignCatalogProvider` solo stub. | Propietario Data-Lab / Analytics CF | Especificar origen, host, autenticación, IDs/labels/parents, filtros y frescura; prueba de contrato sin datos personales en fixtures. |
+| Audiencia | No hay consulta masiva Campaign encontrada. Persistencia PEC prevé filtros jerárquicos, offset y ledger de compra/destinatario. | Propietario Data-Lab + dueño funcional de campañas + Privacidad/Seguridad | Entregar esquema y paginación; definir fecha/cutoff de elegibilidad, compra duplicada, correos vacíos/invalidos, supresión/consentimiento y conteos; demostrar paging estable y no fuga a frontend. |
+| Plantilla Campaign | Emblue v2.3 `sendEmail` recibe destinatario/asunto/HTML/actionId; no se confirmó plantilla de Campaign ni su motor de variables. | Marketing/Comunicaciones + administrador Emblue | Aprobar ID/versión, asunto/HTML, variables, contexto de escape, manejo de ausentes, URL individual y correlación opaca; pruebas de render con valores sintéticos y sin envío. |
+
+Los ejemplos de prueba deben ser sintéticos. La API Key y otras credenciales no aparecen en fixtures, logs o documentación. La aceptación del adaptador emBlue no acredita procesamiento o entrega final. El helper de validación y escape creado en Sprint 3.1C.1 no es un sanitizador del documento HTML ni un renderer productivo.
+
+| 0.5 | 2026-10-23 | Agrega matriz de evidencia, responsables por función y criterios de aceptación para Survey, Data-Lab y plantilla Campaign. DRAFT conservado. |
+
+
+## Sprint 3.1C.1 - publicacion de Survey para Campaign
+
+Regla funcional aprobada para Automated Survey Campaigns: una Survey es elegible solo si `status = 1`, `isPublic = true` y `archived = false`. `status=1` aislado no demuestra publicacion ni cambia el significado global de Survey. La ruta publica existente conserva su comportamiento, incluido el fallback para Surveys genericas; Campaign exige `isPublic=true` y no utiliza ese fallback.
+
+El gate lee `content.availableFrom` y `content.availableTo` si estan configurados. Valida formato e intervalo y verifica que el calendario Campaign completo, desde inicio local hasta fin local inclusivo, quede cubierto. Usa la zona IANA de Campaign para el calendario y el parser server-local ya usado por la ruta publica para interpretar los limites Survey. Mantener TZ consistente entre replicas del API es un requisito operativo; acceso a respuestas despues de `availableTo` y enlace individual Campaign siguen pendientes.
+
+Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aprobada; `SURVEY_CALENDAR_AVAILABILITY` distingue READY, BLOCKED y OPEN. Schedule y Resume vuelven a validar antes de mutar estado. No se modifica Prisma, no se cambia la ruta Surveys, y audiencia real, catalogos reales, plantilla y enlace individual siguen bloqueando la activacion. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1C.2 - evidencia de publicación y disponibilidad
+
+Para Campaign la regla funcional está confirmada y no depende de una integración externa ni de una ruta especial: `status === 1`, `isPublic === true`, `archived === false`. El adaptador concreto consulta esos campos existentes y no utiliza el fallback de encuesta genérica para eludir `isPublic`. Los límites `content.availableFrom/availableTo` se evalúan como check independiente. El contrato de enlace individual sigue OPEN; audiencias, catálogos reales y plantilla permanecen pendientes. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
+
+## Sprint 3.1C.3 - evidencia de catálogos y audiencia CF/Data-Lab
+
+Inspección estática del checkout, sin llamadas externas, consultas de datos ni lectura de valores secretos. PEC ya consume con `BASE_API_URL` `POST /datosCorporativo/areaTrabajo/findAreasByZoneCodes` (envía `zoneCodes` y `areasTypes`) y `GET /datosCorporativo/local/findLocal?codigoCompania=1`. `syncRegions()` usa `workAreaReferenceCode`, `workgroupName`, `countryCode` para vincular áreas de trabajo con establecimientos existentes y regiones PEC. `syncEstablishments()` usa `codigoReferencia`, `establecimiento.nombreEstablecimiento`, `nombreLocal`, dirección, división geopolítica y `estadoOperativo` para actualizar locales, formatos y estado. Son integraciones reutilizables como evidencia de catálogos corporativos PEC limitados; no demuestran contratos de Company, Division/Department de Campaign ni audiencia de compras.
+
+No se encontró cliente, API, vista SQL o procedimiento de Data-Lab/Analytics para compras/destinatarios Campaign. `ClientService` y `CollaboratorService` consultan contactos/documentos individuales, no una audiencia paginada. `AnalyticsCampaignCatalogProvider` continúa como stub sin endpoint, autenticación ni mapeo, y no cae automáticamente a MOCK. La sincronización PEC de locales usa explícitamente `codigoCompania=1`, por lo que no satisface por sí sola selección multiempresa CF.
+
+PEC también expone sus propios recursos `GET /formats` y `GET /establishments`; se apoyan en tablas PEC sincronizadas/administradas y no son contratos directos de Analytics ni una fuente de audiencia. No se deben presentar como catálogos CF multiempresa sin confirmar cobertura, IDs y autorización.
+
+Responsables para cerrar los OPEN: propietario CF/Data-Lab debe proveer contrato/propietario de fuente y claves; equipo Analytics debe confirmar semántica, permisos y SLA; negocio debe definir elegibilidad, deduplicación y exclusiones; Privacidad/Seguridad debe aprobar finalidad, campos mínimos, consentimiento/supresión, retención y acceso. Hasta entonces no implementar un adaptador real. v0.5 / DRAFT.
+
+La evidencia contractual a solicitar incluye: opción autorizada (API, vista/procedimiento accesible o servicio intermediario), propietario y ambiente; método/path o nombre de objeto, autenticación/roles/red; request/response redactados y errores; catálogo de claves/labels/parents y alcance multiempresa; filtros admitidos; definición de compra, fecha oficial, offset y corte temporal; campos de identidad/contacto y su procedencia; reglas de consent/suppression y calidad de email; cursor/orden estable, snapshot/as-of, máximo de página, cuotas, frescura y SLA. No se asigna ningún campo externo sin esa confirmación.
+
+| 0.5 | 2026-10-23 | Registra endpoints corporativos ya consumidos y delimita que no acreditan el contrato Data-Lab de audiencia Campaign; sin llamadas externas ni PII. DRAFT conservado. |
+## Sprint 3.1C.4 - sincronizacion BI PostgreSQL propuesta
+
+La fuente propuesta son dos tablas normales en un esquema `bi_integration`, no un endpoint demostrado. PEC consumiria exclusivamente un snapshot publicado y consultaria ambas tablas con el mismo `load_id`. Protocolo candidato: BI escribe staging sin marcador de publicacion, valida integridad/relaciones y publica filas de catalogo y compras dentro de una sola transaccion; lectores fijan esa version durante todas las paginas. Un `load_id` publicado debe ser inmutable; correcciones crean otro. Una carga incompleta nunca se interpreta como audiencia vacia. Si el conjunto de compras puede ser legitimamente vacio, un manifiesto de lote (tercera relacion) o senal transaccional equivalente es requisito para distinguir vacio de incompleto.
+
+Seguridad propuesta: rol PEC de solo SELECT limitado a las tablas/vistas aprobadas; ningun acceso desde Angular; minima retencion; cifrado/controles de acceso para PII; auditoria de carga y acceso segun politica de CF. `recipient_email` en el DDL es opcional y no aprobado. No se accedio a BI, Neon ni datos personales y no se implemento conexion. Responsable: equipo BI/DBA CF para origen y publicacion; Privacidad/Seguridad para correo/retencion; propietario funcional Campaign para elegibilidad y deduplicacion. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra protocolo y controles de sincronizacion propuestos, pendientes de BI/Seguridad; no se hicieron conexiones. DRAFT conservado. |
+## Sprint 3.1C.4.1 - consolidacion por factura
+
+Cada fila de `bi_customer_purchases` representa una asignacion de factura-linea-producto-division y lleva el origen del sistema y un identificador estable de factura. El consumidor aplica filtros por fila, luego agrupa las coincidencias por `(invoice_source, invoice_external_id)` antes de producir candidatos. Si hay al menos una fila elegible, se produce una invitacion; productos y divisiones duplicados de la misma factura no aumentan el numero de invitaciones. El `purchaseSource`/`purchaseExternalId` del ledger PEC conservan la identidad de factura.
+
+Los resultados deben ordenarse y paginarse por identidad de factura despues de la agrupacion, o usar una consulta agrupada que garantice que ninguna factura atraviese paginas como dos candidatos. Campanas distintas tienen namespaces de deduplicacion separados. El envio al mismo cliente por facturas distintas queda permitido por la decision; reglas de contactabilidad/exclusion aun no se han confirmado. v0.5 / DRAFT.
+## Sprint 3.1D - adaptador PostgreSQL provisional (no BI validado)
+
+`CampaignPostgresStagingProvider` implementa los ports internos de catalogo y audiencia sobre las tablas de `bi_integration`. Se probaron solo fixtures sinteticos en PostgreSQL local aislado. Configuracion explicita: `CAMPAIGN_CATALOG_PROVIDER=postgres-provisional`, `CAMPAIGN_AUDIENCE_PROVIDER=postgres-provisional` y `CAMPAIGN_PROVISIONAL_BI_ENABLED=true`. Si no se configura proveedor, no se sustituye por MOCK/provisional; el modo provisional se rechaza en `NODE_ENV=production` y valida la identidad local antes de leer.
+
+El adaptador fija un lote publicado comun, valida referencias y consistencia, filtra por segmento/fecha, agrupa antes de paginar y liga el cursor al snapshot. El candidato conserva origen/ID/tipo de factura. El preview es agregado y no expone PII. `PROVISIONAL_POSTGRES` no se presenta como `ANALYTICS` ni se conecta a emBlue.
+
+OPEN para BI/negocio/Privacidad: DDL y propietario definitivos, publicacion y lote vacio, frescura/retencion, elegibilidad oficial, calidad de emails, consentimiento/supresion y reuso de factura entre Campaigns. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Registra implementacion local provisional y dependencias externas OPEN; DRAFT conservado. |
+
+## Sprint 3.1E - plantilla sintética, sin despacho (2026-10-23)
+
+Se agrega el fixture `PEC-CAMPAIGN-SYNTHETIC-INVITATION` v1 con una única variable `individualSurveyUrl`; el render requiere URL absoluta HTTPS sin credenciales y escapa el valor para atributo HTML. El HTML resultante tiene forma de contenido compatible con el campo `sendRequest.html` confirmado para emBlue v2.3. No se invoca `EmblueService`, no se usa plantilla de cuenta real y no se interpreta `activityId` como entrega. La gramática de plantillas reales, asunto/contenido aprobados y construcción del enlace individual siguen OPEN.
+## Sprint 3.1F - Integración con Survey y correlación (2026-10-23)
+
+La respuesta Campaign persiste mediante SurveyResult dentro de una transacción que también consume ResponseCorrelation. El enlace se valida sin convertir los parámetros legacy local o idD en tokens. Las rutas públicas generales no cambian. La existencia de estas rutas no habilita despacho: no se conecta audiencia, scheduler ni emBlue; activityId y entrega no participan en esta fase. Las encuestas tipo queja version 2 siguen bloqueadas por su efecto lateral no integrado. v0.5 / DRAFT.
+
+## Sprint 3.1F.1 - dependencias de Survey v2 (2026-10-24)
+
+El flujo de quejas v2 reutiliza búsquedas de contacto CF por ClientService y creación de Complaint; puede procesar archivos y actualizar SurveyResult fuera de la transacción de invitación. No se deben ejecutar esos efectos dentro del request Campaign sin resolver atomicidad, privacidad y acciones posteriores al commit. La ruta Campaign conserva el bloqueo de v2. v0.5 / DRAFT.
+## Sprint 3.1F.1 - exclusión del flujo Complaints (2026-10-24)
+
+Campaign acepta Survey v1 con `content.isQueja !== true`. El flujo general de Survey v2 crea SurveyResult y luego puede consultar contactos mediante ClientService, crear una queja mediante ComplaintsService, procesar adjuntos y actualizar SurveyResult fuera de una transacción atómica. Campaign no invoca ni omite esos efectos: rechaza ese tipo de encuesta. No se alteran integraciones CF existentes ni se usa información personal. Pruebas PostgreSQL de concurrencia/rollback pendientes por falta de instancia local aislada verificable. v0.5 / DRAFT.
+## Sprint 3.1G-A - frontera de simulación y proveedor de correo (2026-10-24)
+
+La orquestación usa únicamente los puertos de catálogos/audiencia y el fixture `PEC-CAMPAIGN-SYNTHETIC-INVITATION`. No tiene dependencia de `EmblueService`; los objetos con `to`, `subject` y `html` se construyen en memoria y se descartan después de contabilizar. Tokens efímeros se limitan a URLs `https://example.invalid/...`, no se guardan en `ResponseCorrelation`, ni se registran ni retornan. No se valida contacto real ni proveedor BI; el outcome ambiguo de emBlue continúa sin reintento automático conforme a política aprobada y no se alcanza en este modo. v0.5 / DRAFT.
+
+
+## Sprint 3.1G-B - simplificación de conexión Campaign (2026-10-25)
+
+La integración provisional usa la única conexión PostgreSQL configurada por PEC (`DATABASE_URL`) y accede a los objetos del esquema `bi_integration`. La habilitación no depende de selectores Campaign redundantes: el entorno local/development/test permitido resuelve automáticamente los ports al proveedor provisional. En producción y entornos no reconocidos se falla cerrado, sin fallback MOCK. La identidad Project/Branch/Endpoint de Neon sigue requiriendo verificación externa antes de lecturas funcionales. Los datos sintéticos no constituyen un contrato BI aprobado.
+
+Para la validación independiente de rama se requieren solo Project ID, Branch ID, propietario esperado de la base y credencial de API Neon (`CAMPAIGN_PROVISIONAL_NEON_PROJECT_ID`, `CAMPAIGN_PROVISIONAL_NEON_BRANCH_ID`, `CAMPAIGN_PROVISIONAL_NEON_DATABASE_OWNER`, `CAMPAIGN_PROVISIONAL_NEON_API_KEY`). El endpoint se extrae del host de `DATABASE_URL`, y la base y el rol de esa misma URL; estos datos de identidad no seleccionan proveedor ni crean otra conexión. **Registro de revisión:** v0.5, 2026-10-25. Se registra la decisión de conexión única/esquemas separados y selección automática protegida. Estado formal `DRAFT` conservado.
+
+
+## Sprint 3.1G-B.1 - auditoria de configuracion Campaign (2026-10-25)
+
+Inspeccion local de nombres de variables, sin leer ni publicar valores: `pec-api/.env` y `.env.local` contienen `DATABASE_URL` y `ENV`. `AppModule` carga globalmente `.env.local`, `.env.preprod`, `.env.prod` y `.env`; el guard lee `process.env`. No se encontro `DIRECT_URL` ni una identidad Neon reutilizable en esos archivos. `PROJECT_ID_GCS` identifica GCP y `API_KEY_STAR` pertenece a otra integracion; no son sustitutos de identidad Neon. El inventario local no prueba variables inyectadas externamente al proceso desplegado.
+
+En el checkout, `CampaignNeonTargetGuard` aun exige Project ID, Branch ID, propietario esperado y credencial API Neon. Ninguno aparece en los archivos locales. El error 503 se origina al faltar esa configuracion: el guard falla antes de llamar a la API de Neon y antes de leer el lote en `bi_integration`. Endpoint ID, base y rol se derivan del `DATABASE_URL`; no se requiere otra conexion ni un `DIRECT_URL`. No se modifico `DATABASE_URL`.
+
+No se retiro la verificacion de rama: `ENV` distingue el entorno PEC, pero no identifica una rama Neon; el hostname solo permite derivar el endpoint. La verificacion API Project/Branch/Endpoint y la comprobacion SQL posterior (base, esquema, rol, propietario y primary) siguen siendo controles distintos. El mecanismo equivalente no puede configurarse con los datos que hoy existen en los archivos inspeccionados. Dato pendiente para una lectura segura: una fuente confiable, ya disponible para NestJS, que relacione la conexion actual con el Project ID y Branch ID de desarrollo y permita verificar esa relacion en Neon. Hasta resolverlo, la lectura funcional falla cerrada. Los SPECS permanecen v0.5 / DRAFT.
+## Consolidación de integración PostgreSQL provisional (2026-10-25)
+
+La implementación vigente reutiliza `DatabaseService` y `DATABASE_URL` de PEC para consultar el esquema `bi_integration`; las reglas antiguas de selectores y habilitadores Campaign quedan supersedidas. La API administrativa de Neon no es parte del flujo de lectura objetivo. El guard actual la usa como control provisional de destino, con validación SQL posterior; no se retirará hasta disponer de autorización confiable equivalente. No basta una comprobación basada solo en `ENV`, hostname, base o `application_name`.
+
+El acceso funcional debe ser de solo lectura para el proveedor provisional. Debe comprobarse mediante privilegios PostgreSQL efectivos; un permiso SELECT no basta para autorizar una rama. La política de producción/entorno desconocido permanece cerrada. Falta identificar Project ID y Branch ID aprobados en Console y la fuente segura de credencial Neon API disponible al proceso NestJS. Estado formal `DRAFT`; versión v0.5.
+
+## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
+
+Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
+
+`GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
+
+Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.

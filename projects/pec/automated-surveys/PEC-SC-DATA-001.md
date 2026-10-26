@@ -349,7 +349,7 @@ Se propone usar enums Prisma para estados/catálogos funcionales nuevos, aunque 
 
 - FK conceptual `Campaign.surveyId` → `sspectsurvey.sspecrpksur`.
 - La encuesta, su contenido SurveyJS y las respuestas permanecen en `sspectsurvey` y `sspectresult`.
-- La regla funcional de programación requiere Survey `PUBLISHED`; en el schema actual el campo visible es `status Int` y `archived Boolean`, y el contenido es `Json`. El significado exacto de publicación no se infiere del schema: requiere validar el servicio/contrato Survey.
+- La regla funcional Campaign requiere status=1, isPublic=true y archived=false; disponibilidad opcional permanece en `content` JSON. No se agrega estado/columna ni se redefine status global.
 - La acción de borrado de Survey y su relación con Campaign debe impedir referencias huérfanas. Comportamiento `Restrict`/archivado se decide al definir migración; no cascader ejecuciones históricas.
 - **OPEN:** el modelo `sspectsurvey` no provee versiones históricas de contenido evidentes. Confirmar si Campaign execution solo necesita snapshot de versión/hash o si debe preservarse la definición de encuesta inmutable mediante el flujo actual.
 
@@ -457,7 +457,7 @@ Estas recomendaciones se deben validar con consultas reales y explain plans; no 
 | OPEN-01 | Contrato CF/Analytics, source codes, IDs/tipos/longitudes, jerarquías y fecha de actualización. | Determina claves de selecciones y deduplicación. |
 | OPEN-02 | Equivalencia o no de Company/Format/Store con `sspectenterprise`/`sspectformat`/`sspectestablishment`. | Evita relaciones FK incorrectas o duplicación de maestros. |
 | OPEN-03 | El alcance multiempresa ya está aprobado; validar que la implementación no filtre por enterprise activo. | No amplía permisos generales de Surveys ni de otros módulos. |
-| OPEN-04 | Campo/regla real que indica Survey `PUBLISHED`, archivado y disponibilidad. | Schema actual muestra `status`, `archived`, `content Json`; semántica publicada no está determinada por el schema aislado. |
+| OPEN-04 | **CLOSED para Campaign:** el gate usa `status=1`, `isPublic=true`, `archived=false`; disponibilidad vive en `content.availableFrom/availableTo`. Esto no establece un estado global `PUBLISHED`. |
 | OPEN-05 | DST/horas ambiguas o inexistentes, timezone de campañas fuera de Ecuador, conversión local/UTC y efecto de recovery/downtime sobre EndDate. El default Ecuador `America/Guayaquil`, la persistencia explícita de timezone, el límite local inclusivo y el ajuste mensual/trimestral anclado están aprobados. | Evita ambigüedad restante en calendarización; no cambia los campos físicos actuales. |
 | OPEN-06 | Cuándo avanzar el próximo ciclo ante fallos parciales y cuál es el cutoff exitoso de audiencia. `lastExecutionAt` queda definido como `finishedAt` de la terminal más reciente, incluso FAILED. | Impacta dashboard, recovery e idempotencia. |
 | OPEN-07 | Forma física exacta del `executionKey`, estrategia PostgreSQL/Prisma para claim y el campo/token de fencing. La clave debe ser determinista y versionada; claim atómico + lease + protección de worker rezagado son reglas APPROVED. | Elegir una implementación compatible con la versión PostgreSQL/Prisma usada. |
@@ -551,3 +551,138 @@ El registro incompleto 20250907231907_add_user_establishment_table es metadato h
 ### Convención Database-First y estado (2026-10-23)
 
 Esta sección supersede notas anteriores que sugirieran prisma migrate resolve o consideraran _prisma_migrations un bloqueo. PostgreSQL es la fuente de verdad. Los cambios físicos se entregan como SQL revisable para ejecución manual; luego se sincroniza schema.prisma y se ejecuta prisma generate. No se aplican cambios con migrate dev/deploy/resolve, db push o migrate reset. La migración Campaign no figura en el historial Prisma, pero esto no afecta el ORM. El SQL de referencia está en prisma/manual-sql/campaign_execution_controls.sql. prisma validate, prisma generate, build NestJS y 84 pruebas unitarias Campaign pasaron después de regenerar el cliente. No se corrieron pruebas PostgreSQL con escrituras. Estado DRAFT conservado.
+
+### Sprint 3.1B — uso del modelo existente
+
+El lifecycle usa `Campaign.status`, `nextExecutionAt` y `version`; las Executions ordinarias y de recovery usan `executionKey`, `recoveryOfExecutionId`, `configurationSnapshot.coveredSlots` y los claims/leases existentes. El avance de calendario y creación de Execution se realizan en una transacción serializada por fila Campaign. No se propusieron columnas, tablas ni SQL nuevos. Las pruebas PostgreSQL de Sprint 3.1B quedaron omitidas en el checkout actual por falta de conexión local; no se afirma validación concurrente de esta fase. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Confirma que Sprint 3.1B reutiliza el modelo persistido sin DDL adicional; las pruebas PostgreSQL de esta fase quedan pendientes. DRAFT conservado. |
+
+### Sprint 3.1B.1 — validación de persistencia
+
+La suite PostgreSQL ejecutó 20 casos contra el contenedor aislado ya existente. Confirmó integridad/constraints y operaciones Campaign, incluida la concurrencia lifecycle/scheduler y la persistencia de recuperación. Tras los fixtures, consultas SELECT comprobaron cero filas de prueba en las tablas Campaign y entidades PEC auxiliares creadas para el test. No se aplicó DDL, Prisma Migrate ni cambios al modelo; base principal y Neon no fueron usados. DRAFT conservado.
+## Registro de validación Sprint 3.1C
+
+No se modifica el modelo persistido. El preflight consulta `sspectsurvey.status`, `archived` e `isPublic` junto con el calendario de Campaign. La regla aprobada para Campaign considera elegible la Survey únicamente con la conjunción `status === 1`, `isPublic === true`, `archived === false`; status aislado no basta. El endpoint público conserva su fallback para encuestas genéricas y revisa `content.availableFrom` / `content.availableTo` al solicitarlo. No hay estado/fecha persistido de publicación ni relación que resuelva destinatario, token o enlace individual de Campaign. Los contratos de audiencia/plantilla permanecen OPEN.
+
+| 0.5 | 2026-10-23 | Registra los campos de Survey verificados y confirma que no se requiere cambio Prisma para el preflight; publicación Campaign, audiencia y enlace individual siguen OPEN. DRAFT conservado. |
+## Sprint 3.1C.1 — campos y puertos candidatos
+
+El modelo actual persiste filtros como IDs externos y `postPurchaseOffset`; `CampaignRecipient` contempla `purchaseSource`, `purchaseExternalId`, `purchaseIdType`, `customerExternalId`, `purchaseDateSnapshot`, `eligibleAt` y `emailSnapshot`. Estos nombres identifican espacio disponible, no demuestran cómo Analytics mapea sus datos ni qué fecha determina elegibilidad. No se consultaron filas ni datos personales.
+
+Se propone `CampaignAudiencePageRequest` con selección configurada, offset, fecha de evaluación, cursor y tamaño de página como interfaz interna. Los cursores/tamaños no son campos confirmados de Data-Lab. El resultado candidato usa referencias de compra/cliente y email; acceso, minimización, retención, filtros de consentimiento, deduplicación y reglas de fecha quedan OPEN. No devolver audiencia completa a Angular ni persistir la audiencia total.
+
+Para plantillas se propone definición versionada con `externalId`, `subject`, `html` y declaración de variables con contexto; el registro actual `emailTemplateExternalId` no acredita una plantilla válida. `opaqueCorrelationReference` no especifica formato ni generación del token. No requiere DDL en esta fase.
+
+| 0.5 | 2026-10-23 | Mapea campos existentes a puertos candidatos sin confirmar mapeos fuente ni elegibilidad; no cambia Prisma. DRAFT conservado. |
+
+
+## Sprint 3.1C.1 - publicacion de Survey para Campaign
+
+Regla funcional aprobada para Automated Survey Campaigns: una Survey es elegible solo si `status = 1`, `isPublic = true` y `archived = false`. `status=1` aislado no demuestra publicacion ni cambia el significado global de Survey. La ruta publica existente conserva su comportamiento, incluido el fallback para Surveys genericas; Campaign exige `isPublic=true` y no utiliza ese fallback.
+
+El gate lee `content.availableFrom` y `content.availableTo` si estan configurados. Valida formato e intervalo y verifica que el calendario Campaign completo, desde inicio local hasta fin local inclusivo, quede cubierto. Usa la zona IANA de Campaign para el calendario y el parser server-local ya usado por la ruta publica para interpretar los limites Survey. Mantener TZ consistente entre replicas del API es un requisito operativo; acceso a respuestas despues de `availableTo` y enlace individual Campaign siguen pendientes.
+
+Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aprobada; `SURVEY_CALENDAR_AVAILABILITY` distingue READY, BLOCKED y OPEN. Schedule y Resume vuelven a validar antes de mutar estado. No se modifica Prisma, no se cambia la ruta Surveys, y audiencia real, catalogos reales, plantilla y enlace individual siguen bloqueando la activacion. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1C.2 - lectura del estado Survey
+
+Sin cambio de esquema: el validador Campaign lee los campos existentes `status`, `isPublic`, `archived` y `content`. Elegibilidad confirmada exige exactamente `status === 1`, `isPublic === true`, `archived === false`. No se añade campo ni flujo de publicación. Los límites opcionales `content.availableFrom/availableTo` se validan como fechas calendario y deben cubrir la ventana programada. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
+
+## Sprint 3.1C.3 - correspondencia pendiente de fuente real
+
+| Campo requerido por Campaign | Campo PEC/fuente observado | Estado del mapeo |
+|---|---|---|
+| Division / división externa | `workgroupName` y `workAreaReferenceCode` aparecen en `syncRegions()` para áreas de trabajo/zonas; el primero se persiste como `sspectregion.name`. | Sin equivalencia confirmada con Division CF/Data-Lab. |
+| Department / departamento externo | No identificado en respuesta/uso del código inspeccionado. | Sin asignar. |
+| Company CF | `codigoCompania=1` es parámetro fijo al sincronizar locales; `sspectenterprise` es Enterprise PEC independiente. | Sin catálogo multiempresa ni equivalencia confirmada. |
+| Auxiliary Classification | No identificada en fuentes del checkout. | Sin asignar; permanece fuera de V1 según alcance. |
+| Format | `establecimiento.nombreEstablecimiento` se usa para resolver por nombre `sspectformat`; no se conserva ahí ID externo de Format. | Reutilización PEC parcial; identidad/origen CF no probado. |
+| Store | `codigoReferencia` alimenta `sspectestablishment.code`; `nombreLocal`, dirección, estado operativo y formato se sincronizan. Consulta observada restringida a `codigoCompania=1`. | Reutilización PEC parcial para los locales sincronizados; no prueba cobertura completa multiempresa ni contrato Campaign. |
+| Purchase external ID / source / type | Campaign espera `purchaseSource`, `purchaseExternalId`, `purchaseIdType`; no se encontró ledger/feed de compras de cliente en modelos PEC inspeccionados. | Sin asignar; Data-Lab debe definir clave estable, namespace y tipo. |
+| Purchase date | `sspectcomplaint.invoiceDate` y `dateOfPurchase` son fechas de queja/reclamo, no evidencia de transacción comprada. | No reutilizar como fecha de elegibilidad. Fuente de compra pendiente. |
+| Customer external ID / email | `ClientService.findPersonContact()` requiere documento individual y devuelve tipo no tipado; no hay consulta masiva de contactos asociada a compras. `CampaignRecipient` admite IDs/email snapshots opcionales. | Contrato de destinatario y fuente de email sin asignar. |
+| Filtros jerárquicos | Campaign persiste IDs externos como strings y snapshots label/parent; MOCK define relaciones sintéticas. | Fuente real, claves y relaciones no verificadas. |
+
+La búsqueda en el repositorio no encontró scripts SQL de vistas/procedimientos ni un cliente Data-Lab/Analytics de audiencia. Esta constatación se limita al checkout inspeccionado; no demuestra que CF carezca de tales fuentes. No leer datos reales ni inferir catálogo por similitud de nombres. No se requieren cambios Prisma en este diagnóstico. v0.5 / DRAFT.
+
+El port `CampaignAudiencePageRequest` incluye selección, `postPurchaseOffsetDays`, `evaluationDate`, `cursor` y `pageSize`; no define corte reproducible (`eligibilityCutoffAt`/snapshot), timezone asociado a evaluationDate, orden/cursor estable ni forma de distinguir agotamiento normal de una fuente incompleta. `CampaignRecipientCandidate` no lleva `purchaseIdType` aunque `CampaignRecipient` lo persiste. No se asigna email ni identificador PEC de contacto como equivalencia de cliente corporativo. Validar si la fuente devuelve correo/contacto autorizado junto con la compra o si se requiere un segundo lookup permitido.
+
+| 0.5 | 2026-10-23 | Documenta mapeos observados y campos de fuente real aún sin asignar; no consulta datos ni cambia esquema. DRAFT conservado. |
+## Sprint 3.1C.4 - DDL propuesto de staging BI (OPEN)
+
+El DDL revisable esta en `pec-api/prisma/manual-sql/bi_campaign_staging_proposal.sql`. Define, solo como propuesta, `bi_integration.bi_segmentation_catalog` (snapshot por `load_id`, tipo/id/label, padre tipado, Company, active, vigencia y timestamps de fuente/carga/publicacion) y `bi_integration.bi_customer_purchases` (identidad de registro fuente, purchase source/id/type, purchase line opcional, fecha/hora, customer, campos de segmentacion/producto y marcador de publicacion). IDs externos son TEXT opacos; el batch se propone UUID. Sin FKs entre dimensiones porque sus codigos y relaciones reales no estan confirmados.
+
+Claves propuestas: `(load_id, catalog_type, external_id)` y `(load_id, source_record_external_id)`. Indices soportan filtros y keyset por `source_record_external_id`; unicidad del ledger PEC sigue siendo `(campaignId, purchaseSource, purchaseExternalId)`. La tabla de compras hace Division, Department y Company requeridos, alineado a filtros obligatorios, sujeto a que BI confirme estos datos en cada fila. Las dimensiones opcionales corresponden a clasificacion auxiliar, formato y local; Auxiliary Subclassification queda excluida.
+
+Propuesta de lote: cargar ambos snapshots bajo el mismo load_id, validar, y en una transaccion publicar filas de ambas tablas; lectores fijan un unico load_id para todas las paginas. Este marcador por fila no representa correctamente una fuente vacia; si vacio es valido, hace falta una relacion manifiesto o senal atomica equivalente. Retencion, snapshot completo vs incremental, frecuencia, claves, significado de vigencia/fechas, grano (compra vs linea) y proteccion de `recipient_email` quedan OPEN. El email nullable del SQL es sensible y no aprobado; preferir resolverlo en backend desde fuente autorizada. No cambiar Prisma ni ejecutar DDL. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Agrega diseno de datos propuesto para dos tablas BI y senala limites de publicacion por lote; DDL no ejecutado. DRAFT conservado. |
+
+OPEN de grano: el ledger PEC tiene unicidad por `(campaignId, purchaseSource, purchaseExternalId)`, mientras el staging incluye `source_record_external_id` y `purchase_line_external_id` para poder representar una linea o registro fuente. Si BI entrega una fila por producto/linea, el adaptador debe agrupar a compra antes de persistir, o se requiere una decision/cambio de modelo para envio por linea. No se debe escoger esa semantica implicitamente.
+## Sprint 3.1C.4.1 - unidad de invitacion por factura (APPROVED)
+
+Decision funcional aprobada: una invitacion por cada factura/compra elegible y Campaign. El staging `bi_customer_purchases` pasa a grano de asignacion factura-linea-producto-division: una factura puede producir varias filas, productos y divisiones. Debe llevar `invoice_source` y `invoice_external_id` estables y no vacios; se exige `invoice_line_external_id` y `product_external_id` para poder evaluar productos. Se conserva `source_record_external_id` como clave de fila unica por lote. La identidad factura+origen se indexa, no se declara unica porque varias filas por factura son esperadas; el consumidor agrupa las coincidencias y deduplica la invitacion por factura.
+
+La audiencia agrupa por identidad `(Campaign, invoice_source, invoice_external_id)` y califica la factura si al menos una fila producto/division satisface todos los filtros seleccionados; multiples IDs dentro de la misma dimension son OR y dimensiones diferentes son AND. Al persistir, `purchaseSource` recibe `invoice_source`, `purchaseExternalId` recibe `invoice_external_id` y `purchaseIdType` puede recibir `invoice_id_type` una vez confirmado el vocabulario BI. La restriccion actual `CampaignRecipient` unica por `(campaignId, purchaseSource, purchaseExternalId)` ya implementa deduplicacion por Campaign e identidad de compra: permite facturas distintas del mismo cliente y no deduplica globalmente por customer/email. No se requiere cambio estructural del ledger PEC para esta regla. Campaign->Execution->Recipient->Attempt se conserva con las relaciones existentes; Recipient retiene origen e ID externo de factura como referencia trazable a la fuente. `configurationSnapshot` puede registrar `load_id` al integrar el proveedor, sin agregar columna ahora.
+
+OPEN: si una factura puede participar en varias Campaigns queda pendiente de confirmacion; actualmente el modelo permite un Recipient distinto por Campaign. Contactabilidad, consentimiento, supresiones y exclusiones siguen pendientes. Las filas del mismo invoice deben consolidarse antes de paginar resultados de Recipient para no emitir mas de una invitacion. v0.5 / DRAFT.
+## Sprint 3.1D - tablas provisionales locales
+
+El SQL ejecutado solo en PostgreSQL local aislado esta en `pec-api/prisma/manual-sql/bi_campaign_staging_provisional_local_test.sql`; los fixtures sinteticos estan en `bi_campaign_staging_provisional_seed.sql`. Se crearon tablas PostgreSQL normales `bi_integration.bi_segmentation_catalog` y `bi_integration.bi_customer_purchases`, fuera de Prisma. No se agregaron modelos ni se alteraron tablas del ledger.
+
+El catalogo conserva snapshot (`load_id`), tipo/ID/etiqueta, padre tipado, empresa, vigencia, activo y timestamps. Compras conserva `source_record_external_id`, identidad de factura (`invoice_source`, `invoice_external_id`, `invoice_id_type`), linea, fechas, cliente/email sinteticos, empresa/division/departamento, dimensiones opcionales, producto y timestamps. La unicidad de fila es por snapshot + registro fuente; la relacion padre se declara dentro del catalogo y las referencias de compras se validan en el proveedor.
+
+Solo se leen lotes publicados conjuntamente, con un `load_id` y timestamp de publicacion comunes. El cursor queda fijado al snapshot y la consulta agrupa por origen + factura antes de paginar. La restriccion existente del ledger `(campaignId, purchaseSource, purchaseExternalId)` implementa deduplicacion por Campaign + factura; no requiere cambio. La fuente es provisional, no DDL/contrato BI aprobado. OPEN: manifiesto para lote legitimo vacio, protocolo de inmutabilidad, retencion, contacto y reuso de factura entre campañas. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Registra DDL provisional aplicado solo en PostgreSQL local; sin cambios Prisma/ledger ni aprobacion BI. |
+
+## Sprint 3.1E - uso del ledger de correlación (2026-10-23)
+
+El esquema existente `ResponseCorrelation` ya ofrece FK a `CampaignRecipientAttempt`, `tokenHash` único, `surveyResultId`, `expiresAt` y `consumedAt`; permite trazar Attempt → Recipient → factura y asociar una respuesta sin guardar el token en claro. No se requieren cambios Prisma ni DDL. La creación y asociación se implementan detrás de un servicio interno; no se cambió el ledger de Campaign ni las tablas generales de Surveys. La ejecución del DDL/seed de staging en Neon fue reportada por el usuario, no comprobada mediante consulta en esta entrega. v0.5 / DRAFT.
+## Sprint 3.1F - Persistencia de respuesta correlacionada (2026-10-23)
+
+Se reutiliza el esquema existente ResponseCorrelation: tokenHash, campaignRecipientAttemptId, surveyResultId, expiresAt y consumedAt. En una transacción se crea sspectresult y se actualiza condicionalmente la correlación solo si no fue consumida ni venció; si la actualización no afecta una fila, se revierte también la creación del resultado. El FK existente conserva Campaign → Execution → Recipient → Attempt → ResponseCorrelation → SurveyResult, y Recipient conserva identidad de compra. No se requiere DDL ni cambio Prisma. v0.5 / DRAFT.
+
+## Sprint 3.1F.1 - evidencia de transacción (2026-10-24)
+
+El diseño reutiliza ResponseCorrelation y SurveyResult existentes y persiste ambos cambios en una transacción Prisma con consumo condicional de un solo uso. La unidad verifica el flujo y el caso de compare-and-set perdido; falta una corrida PostgreSQL real que confirme rollback y una sola fila confirmada bajo carrera. Sin cambio de esquema ni DDL en esta fase. v0.5 / DRAFT.
+## Sprint 3.1F.1 - compatibilidad y alcance de persistencia (2026-10-24)
+
+La decisión de compatibilidad se determina con los campos ya existentes `sspectsurvey.version` y `content.isQueja`; no requiere cambios de esquema, SQL ni Prisma. Solo se correlacionan respuestas de Survey v1 de satisfacción. No se ejecutaron escrituras ni pruebas contra PostgreSQL en esta validación; la atomicidad bajo concurrencia y rollback sigue pendiente de evidencia de la base local aislada. v0.5 / DRAFT.
+## Sprint 3.1G-A - simulación sin persistencia de invitaciones (2026-10-24)
+
+La simulación consulta el ledger Campaign y staging provisional en modo lectura. Identidad de deduplicación en memoria: `(purchaseSource, purchaseExternalId)` dentro de la Campaign; corresponde a la unicidad existente Campaign + compra de `CampaignRecipient`. Para una ejecución futura, se propone crear/reutilizar Recipient por esa clave y registrar cada Attempt con su `attemptKey`; el token opaco se emitiría asociado al Attempt y solo su hash quedaría en `ResponseCorrelation`, mientras el valor claro existiría transitoriamente para preparar el correo. Esa orquestación durable no se implementa aquí y requiere validar atomicidad/integración PostgreSQL antes de afirmar consistencia. No hubo cambios Prisma/SQL ni inserciones a ResponseCorrelation. v0.5 / DRAFT.
+
+
+## Sprint 3.1G-B - simplificación de conexión Campaign (2026-10-25)
+
+Las tablas provisionales `bi_integration.bi_segmentation_catalog` y `bi_integration.bi_customer_purchases` residen en la misma base PEC y se acceden con el `DatabaseService` existente mediante nombres cualificados. No se crea otra conexión, se cambia `DATABASE_URL` ni se modifica el DDL. La prueba de identidad Neon debe completarse antes de consultar la rama de desarrollo.
+
+Para la validación independiente de rama se requieren solo Project ID, Branch ID, propietario esperado de la base y credencial de API Neon (`CAMPAIGN_PROVISIONAL_NEON_PROJECT_ID`, `CAMPAIGN_PROVISIONAL_NEON_BRANCH_ID`, `CAMPAIGN_PROVISIONAL_NEON_DATABASE_OWNER`, `CAMPAIGN_PROVISIONAL_NEON_API_KEY`). El endpoint se extrae del host de `DATABASE_URL`, y la base y el rol de esa misma URL; estos datos de identidad no seleccionan proveedor ni crean otra conexión. **Registro de revisión:** v0.5, 2026-10-25. Se registra la decisión de conexión única/esquemas separados y selección automática protegida. Estado formal `DRAFT` conservado.
+
+
+## Sprint 3.1G-B.1 - auditoria de configuracion Campaign (2026-10-25)
+
+Inspeccion local de nombres de variables, sin leer ni publicar valores: `pec-api/.env` y `.env.local` contienen `DATABASE_URL` y `ENV`. `AppModule` carga globalmente `.env.local`, `.env.preprod`, `.env.prod` y `.env`; el guard lee `process.env`. No se encontro `DIRECT_URL` ni una identidad Neon reutilizable en esos archivos. `PROJECT_ID_GCS` identifica GCP y `API_KEY_STAR` pertenece a otra integracion; no son sustitutos de identidad Neon. El inventario local no prueba variables inyectadas externamente al proceso desplegado.
+
+En el checkout, `CampaignNeonTargetGuard` aun exige Project ID, Branch ID, propietario esperado y credencial API Neon. Ninguno aparece en los archivos locales. El error 503 se origina al faltar esa configuracion: el guard falla antes de llamar a la API de Neon y antes de leer el lote en `bi_integration`. Endpoint ID, base y rol se derivan del `DATABASE_URL`; no se requiere otra conexion ni un `DIRECT_URL`. No se modifico `DATABASE_URL`.
+
+No se retiro la verificacion de rama: `ENV` distingue el entorno PEC, pero no identifica una rama Neon; el hostname solo permite derivar el endpoint. La verificacion API Project/Branch/Endpoint y la comprobacion SQL posterior (base, esquema, rol, propietario y primary) siguen siendo controles distintos. El mecanismo equivalente no puede configurarse con los datos que hoy existen en los archivos inspeccionados. Dato pendiente para una lectura segura: una fuente confiable, ya disponible para NestJS, que relacione la conexion actual con el Project ID y Branch ID de desarrollo y permita verificar esa relacion en Neon. Hasta resolverlo, la lectura funcional falla cerrada. Los SPECS permanecen v0.5 / DRAFT.
+## Consolidación DatabaseService / esquemas (2026-10-25)
+
+Campaign usa el `DatabaseService`/PrismaClient existente y la única `DATABASE_URL` de PEC. Las lecturas de staging se califican con `bi_integration.bi_segmentation_catalog` y `bi_integration.bi_customer_purchases`; no se configura una conexión independiente por esquema. El rol de ejecución debe contar solo con los privilegios requeridos para lectura de esas tablas. Los privilegios de base de datos no identifican por sí mismos la rama Neon.
+
+La validación de destino y entorno es un control de seguridad de arquitectura descrito en ARCH/INTEG. La API administrativa de Neon no es parte del acceso normal a datos objetivo. Hasta contar con una autorización confiable del destino que no dependa de `ENV` o hostname solamente, se conserva el guard actual y el fallo cerrado antes de las consultas funcionales. Estado formal `DRAFT`; versión v0.5.
+
+## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
+
+Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
+
+`GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
+
+Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.

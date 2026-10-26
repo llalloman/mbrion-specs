@@ -66,11 +66,11 @@ El API deriva identidad y rol efectivos de la autenticacion, no confia en la emp
 - **MOCK:** contrato interno estable para catálogos Campaign: `GET /survey-campaigns/catalogs/:catalog`, con `catalog` en `divisions`, `departments`, `companies`, `auxiliaryClassifications`, `formats`, `stores`, y query opcional `parentId`. Respuesta arreglo `{ id, label, parentId?, active, source }`; `source` es `MOCK` o `ANALYTICS`. IDs y labels MOCK son sintéticos; las relaciones parent-child solo son demostrativas.
 - MOCK requiere configuración explícita en ambiente no productivo; está prohibido en producción y no es fallback ante error de Analytics. No se definen URL, auth ni formato externo de Analytics.
 - Division, Department y Company pueden faltar en DRAFT y son requeridos para programar; Auxiliary Classification, Format y Store son opcionales. Backend valida IDs, actividad y relaciones con proveedor configurado.
-- **DEFERRED:** Preview real, scheduler y envíos no pueden utilizar MOCK. `Survey.status = 1` no equivale a `PUBLISHED` hasta resolver OPEN-API-01.
+- **DEFERRED:** Preview real, scheduler y envíos no pueden utilizar MOCK. status=1 por si solo no prueba publicacion; para Campaign esta aprobada la conjuncion status=1, isPublic=true y archived=false, con vigencia que cubra el calendario.
 
 ### Estado del contrato en checkout
 
-Verificado en el codigo del checkout: existen `GET /survey-campaigns/surveys` y `GET /survey-campaigns/catalogs/:catalog`. Preview y scheduling descritos mas adelante son contratos propuestos y quedan DEFERRED mientras el provider sea MOCK. El filtro actual status=1/archived=false no demuestra estado PUBLISHED (OPEN-API-01).
+Verificado en el checkout: existen `GET /survey-campaigns/surveys` y `GET /survey-campaigns/catalogs/:catalog`. Preview real y scheduling efectivo siguen DEFERRED por cat?logos MOCK, audiencia y plantilla; la elegibilidad de Survey para Campaign usa los tres campos aprobados.
 
 ## 4. DTOs de referencia
 
@@ -130,7 +130,7 @@ No recibe estado, `nextExecutionAt` ni `lastExecutionAt`; la acción valida la c
 - Para validar una operación efectiva de programación, `durationDays = calendarDayDifference(endDate, startDate) + 1`; se cuentan ambas fechas como fechas de calendario, sin timestamps, diferencias horarias ni conversiones UTC. Un `DRAFT` puede conservar campos incompletos o una frecuencia pendiente de corrección.
 - Para Campaigns de Ecuador, la zona predeterminada aprobada es `America/Guayaquil`. `timeZone` debe persistirse explícitamente en la Campaign antes de una programación efectiva; Angular no la infiere del navegador. DRAFT puede seguir sin zona mientras no se programe.
 - `EndDate` es inclusiva como fecha local de negocio: una ocurrencia exactamente en esa fecha a `SendTime` es válida y no se generan ocurrencias con fecha local posterior. `MONTHLY`/`QUARTERLY` calculan cada ocurrencia desde `StartDate` y su índice; conservan el día original o usan el último día disponible del mes, sin desplazar el ancla, antes de convertir a UTC. Downtime, reanudación y finalización después de recuperación siguen OPEN.
-- Schedule y Resume permanecen bloqueados hasta que se resuelvan `PUBLISHED`, audiencia real, fuente de catálogos no MOCK y las demás precondiciones aprobadas. `Survey.status = 1` no demuestra `PUBLISHED`.
+- Schedule y Resume permanecen bloqueados por audiencia real, catalogos no MOCK, plantilla y otros requisitos. La Survey se verifica con status=1, isPublic=true, archived=false y calendario dentro de su disponibilidad.
 
 ### 4.3 `AudiencePreviewDto`
 
@@ -261,7 +261,7 @@ Conflicto de concurrencia/versión y uso de `version` optimista **OPEN**; no ace
 
 Request: sin body; programa la configuración guardada. Respuesta `200`: Campaign actualizada con `status: "SCHEDULED"` y `nextExecutionAt` calculada.
 
-Validaciones: transición permitida; Survey existente, accesible y `PUBLISHED`; segmentation obligatoria completa; offset >= 0; SendType y fechas/hora/frecuencia válidas; frecuencia permitida para la duración; `timeZone` persistida; ocurrencias dentro del límite local inclusivo de `EndDate`; Email Template según regla OPEN. `DRAFT` es el estado esperado para la primera programación. **Schedule permanece bloqueado** mientras publicación, audiencia real u otras precondiciones estén sin resolver; `status = 1` no prueba publicación.
+Validaciones: transicion permitida; Survey existente con status=1, isPublic=true, archived=false y disponibilidad que cubra todo el calendario; segmentacion obligatoria completa; offset >= 0; SendType y fechas/hora/frecuencia validas; frecuencia permitida para la duracion; timeZone persistida; EndDate local inclusiva; Email Template segun regla OPEN. DRAFT es el estado esperado para la primera programacion. Schedule permanece bloqueado por audiencia real, catalogos no MOCK y plantilla.
 
 ### 5.7 Suspend
 
@@ -377,9 +377,9 @@ Reutilizar las capacidades existentes, sin duplicar SurveyJS ni crear en este do
 
 - `GET /surveys` y `GET /surveys/:id` son rutas generales con permisos actuales; Campaign no las usa para ampliar acceso.
 - `GET /survey-campaigns/surveys` lista Surveys accesibles al selector Campaign bajo CASL Campaign, para varias empresas; no concede permisos generales Survey.
-- El selector Campaign usa actualmente status=1 y archived=false. Esto no demuestra que status=1 equivalga a PUBLISHED (OPEN-API-01).
+- El selector Campaign usa `status=1` y `archived=false`; el gate de Schedule/Resume adem?s exige `isPublic=true` y valida la ventana completa.
 - Al programar, el API debe validar en servidor la regla funcional `PUBLISHED`, además de existencia, archivado y disponibilidad que correspondan.
-- **OPEN:** definición técnica de `PUBLISHED` y campos mínimos/response de Survey elegible. No cambiar el significado de `status` existente por conveniencia del nuevo módulo.
+- **OPEN:** uniformidad de TZ local entre replicas API, enlace individual y acceso a respuestas despues de availableTo. La regla Campaign de elegibilidad ya esta cerrada; no se cambia status global.
 
 ## 10. Validaciones por operación
 
@@ -459,7 +459,7 @@ En `GET /survey-campaigns`, `searchText` busca Campaign Name y `surveySearchText
 
 ## 14. OPENs de contrato
 
-- **OPEN-API-01:** Mapear `PUBLISHED` al modelo y servicio Survey real; el contrato existente usa `status` entero y `archived`, no enum publicado verificado.
+- **OPEN-API-01 (CLOSED para Campaign):** el gate combina `status=1`, `isPublic=true`, `archived=false`; no introduce ni presupone un enum global `PUBLISHED`.
 - **OPEN-API-02:** Roles efectivos y alcance multiempresa Campaign estan aprobados: ADMIN/SUPERADMIN. Verificar acceso a Surveys conforme a politica aprobada y no regresion en otros modulos.
 - **OPEN-API-03:** Permiso y campos autorizados especificos para consultar recipients; no cambia el acceso Campaign basico aprobado.
 - **OPEN-API-04:** Compleción mínima permitida de `DRAFT` y obligatoriedad/identificador de `emailTemplateExternalId`.
@@ -511,7 +511,7 @@ Una respuesta exitosa de endpoint indica aceptación/persistencia del comando, n
 - **Status:** DRAFT
 - **Version:** 0.5
 - **Fuentes revisadas:** ARCH-001, FOUND-001, DATA-001, controllers/DTOs/guards/pipes y filtro global de `pec-api`.
-- **Pendiente:** resolver permisos especificos de recipients, Survey PUBLISHED, contratos CF/Analytics/Emblue y reglas temporales/operativas OPEN.
+- **Pendiente:** permisos especificos de recipients, contratos CF/Analytics/Emblue y reglas temporales/operativas OPEN. La regla de Survey para Campaign esta cerrada.
 - **No incluidos en este contrato:** rutas de proveedores externos, politica Analytics real, implementacion de scheduler/envios y migraciones ejecutadas por este documento.
 
 ## 17. Historial de cambios
@@ -530,3 +530,126 @@ Una respuesta exitosa de endpoint indica aceptación/persistencia del comando, n
 ### Convención Database-First (2026-10-23)
 
 Prisma se utiliza como ORM y generador del cliente desde schema.prisma; PostgreSQL se administra mediante SQL manual. NestJS no presupone que Prisma aplique DDL en despliegue. El entrypoint del checkout tiene una ruta opcional RUN_MIGRATIONS=true, pero el template Helm revisado no la configura; consultar ARCH-001. La ausencia de una fila en _prisma_migrations no bloquea Prisma Client. DRAFT conservado.
+
+### Sprint 3.1B — rutas lifecycle presentes
+
+El controller expone `PATCH /survey-campaigns/:campaignId/schedule`, `/suspend`, `/resume` y `GET /survey-campaigns/:campaignId/executions?limit=10`, bajo los guards y permisos Campaign existentes (sin cambiar CASL). Schedule y Resume retornan `409 CAMPAIGN_OPERATION_BLOCKED` con lista de bloqueos mientras no se verifiquen publicación de Survey, audiencia real, catálogo no MOCK y contrato de plantilla. Suspend permite SCHEDULED/ACTIVE→SUSPENDED e impide nuevos claims/lotes; el claim de una ejecución también verifica estado de Campaign. La consulta de Execution limita `limit` a 1–100. El worker no tiene endpoint HTTP. No se añadieron contratos generales de Survey ni una excepción de seguridad.
+
+| 0.5 | 2026-10-23 | Registra las rutas protegidas de lifecycle y consulta de ejecuciones; Schedule/Resume permanecen fail-closed por dependencias OPEN. DRAFT conservado. |
+
+### Sprint 3.1B.1 — validación de API lifecycle
+
+La suite Campaign completa pasó con integración PostgreSQL: 20 pruebas integradas y 108 unitarias. Los contratos Schedule/Suspend/Resume y consulta de ejecuciones mantienen sus guards/CASL; las dependencias de publicación de Survey, audiencia, catálogo real y plantilla siguen bloqueando Schedule/Resume. La validación PostgreSQL no ejecutó el scheduler automático ni alteró despliegue, Neon o datos previos. Estado v0.5 / DRAFT.
+## Registro de validación Sprint 3.1C
+
+Se añade `GET /survey-campaigns/:campaignId/preflight`, autenticado y autorizado con `Read Campaign`. La respuesta incluye `campaignId`, `campaignStatus`, `ready`, checks con códigos técnicos y estados `READY | BLOCKED | OPEN`, mensajes en español y los blockers que siguen impidiendo Schedule/Resume. Es una consulta de solo lectura; `ready` permanece falso mientras haya checks OPEN/bloqueados. No cambia endpoints generales de Surveys ni permite saltar las precondiciones.
+
+| 0.5 | 2026-10-23 | Documenta endpoint Campaign de preflight de solo lectura y su respuesta fail-closed; contratos externos no verificados siguen OPEN. DRAFT conservado. |
+## Sprint 3.1C.1 — puertos internos propuestos
+
+Los tipos declarativos de `CampaignAudienceProvider` paginado y `CampaignTemplateProvider` en `src/survey-campaigns/contracts/campaign-integration.contracts.ts` siguen siendo propuestas internas, no endpoints ni contratos externos. `SurveyPublicationValidator` ya tiene implementación Campaign registrada en NestJS y consulta campos existentes de Survey según la decisión aprobada. El `CampaignCatalogProvider` actual cubre list/find de catálogos; Analytics continúa sin contrato.
+
+La evaluación de publicación Campaign usa `CONFIRMED | NOT_CONFIRMED` con razón separada y aplica la conjunción funcional aprobada; no existe `UNKNOWN` por ausencia de endpoint específico. Solicitudes de audiencia usan cursor opaco como abstracción PEC, sujeto a reemplazo al recibir el contrato real. El valor `email` de un candidato es dato sensible: no se loguea ni se expone a Angular.
+
+El preflight se conserva `READY | BLOCKED | OPEN`. `SURVEY_PUBLICATION` se resuelve por la regla funcional confirmada y no queda OPEN por falta de endpoint específico. `CAMPAIGN_SURVEY_URL`/enlace individual, `REAL_AUDIENCE` y `EMAIL_TEMPLATE` permanecen OPEN/BLOCKED por falta de contratos. Proveedor MOCK no puede habilitar programación.
+
+| 0.5 | 2026-10-23 | Añade puertos TS candidatos; publicación Campaign se implementa según la decisión funcional posterior y los demás puertos no crean APIs externas. DRAFT conservado. |
+
+
+## Sprint 3.1C.1 - publicacion de Survey para Campaign
+
+Regla funcional aprobada para Automated Survey Campaigns: una Survey es elegible solo si `status = 1`, `isPublic = true` y `archived = false`. `status=1` aislado no demuestra publicacion ni cambia el significado global de Survey. La ruta publica existente conserva su comportamiento, incluido el fallback para Surveys genericas; Campaign exige `isPublic=true` y no utiliza ese fallback.
+
+El gate lee `content.availableFrom` y `content.availableTo` si estan configurados. Valida formato e intervalo y verifica que el calendario Campaign completo, desde inicio local hasta fin local inclusivo, quede cubierto. Usa la zona IANA de Campaign para el calendario y el parser server-local ya usado por la ruta publica para interpretar los limites Survey. Mantener TZ consistente entre replicas del API es un requisito operativo; acceso a respuestas despues de `availableTo` y enlace individual Campaign siguen pendientes.
+
+Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aprobada; `SURVEY_CALENDAR_AVAILABILITY` distingue READY, BLOCKED y OPEN. Schedule y Resume vuelven a validar antes de mutar estado. No se modifica Prisma, no se cambia la ruta Surveys, y audiencia real, catalogos reales, plantilla y enlace individual siguen bloqueando la activacion. Se conserva v0.5 / DRAFT.
+
+## Sprint 3.1C.2 - validador concreto de Survey para Campaign
+
+`SurveyPublicationValidator` es un servicio NestJS del módulo Campaign que lee `status`, `isPublic`, `archived` y `content` de Survey. La publicación se confirma únicamente con `status === 1`, `isPublic === true` y `archived === false`; no hay flujo adicional. El preflight reporta `SURVEY_PUBLICATION` READY/BLOCKED con esta evidencia y `SURVEY_CALENDAR_AVAILABILITY` READY/BLOCKED/OPEN por separado. Schedule y Resume consumen el mismo validador; el gate no utiliza el fallback genérico de Surveys. La URL individual continúa OPEN. Audiencia real, plantilla y catálogos MOCK continúan bloqueando programación. Evidencia local 2026-10-23: 34 pruebas focalizadas aprobadas, build NestJS aprobado y ESLint focalizado aprobado. v0.5 / DRAFT.
+
+## Sprint 3.1C.3 - estado de los contratos de proveedor
+
+El contrato HTTP de Campaign sigue siendo el frontend PEC → endpoints Campaign; su abstracción de catálogos es `CampaignCatalogProvider.list/find`. `AnalyticsCampaignCatalogProvider` no implementa I/O y responde con NotImplemented/Unavailable; `CAMPAIGN_CATALOG_PROVIDER=analytics` no constituye conexión real. `CampaignAudienceProvider.resolveEligiblePage` y sus tipos (`segment`, `postPurchaseOffsetDays`, `evaluationDate`, `cursor`, `pageSize`, `purchaseSource`, `purchaseExternalId`, `purchaseDate`, `customerExternalId`, `email`) son una propuesta interna, no un contrato externo. No se verificaron método/path, autenticación, filtros, campos, paginación, límites ni errores Data-Lab. No cambiar Angular/API hasta recibir la especificación real. v0.5 / DRAFT.
+
+Brechas del port actual frente a persistencia/operación: `CampaignRecipient` incluye `purchaseIdType`, pero `CampaignRecipientCandidate` no; el request no transporta de forma explícita zona de negocio ni `eligibilityCutoffAt`/snapshot de lectura, y el response no define cursor/snapshot de consistencia, fin de página, estado de fuente incompleta o errores recuperables. Tampoco expresa reglas de exclusión por recipients ya procesados, supresión o política de email. No completar estos campos con supuestos; confirmar con Data-Lab y el dueño funcional antes de cambiar el contrato.
+
+La fábrica del módulo bloquea `CAMPAIGN_CATALOG_PROVIDER=mock` cuando `NODE_ENV=production` y no tiene fallback automático a MOCK. Sin configuración selecciona `UnconfiguredCampaignCatalogProvider`; actualmente ese stub declara `source = 'ANALYTICS'` pese a no tener proveedor conectado. El preflight sigue OPEN/BLOCKED y no habilita programación, pero esta etiqueta es una limitación de observabilidad; no debe tomarse como evidencia de Analytics real.
+
+| 0.5 | 2026-10-23 | Registra los contratos externos no encontrados, el stub Analytics y los campos pendientes de AudienceProvider. DRAFT conservado. |
+
+| 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
+## Sprint 3.1C.4 - mapeo propuesto del staging BI
+
+No se agregan endpoints externos ni cambia el contrato Angular. Mapeo interno candidato: catalog `external_id -> id`, `label -> label`, `parent_external_id -> parentId`, `active -> active`; audience rows -> `CampaignRecipientCandidate.purchaseSource`, `purchaseExternalId`, `purchaseIdType`, `purchaseDate`, `customerExternalId`, `email`. El port actual no contiene `purchaseIdType`; ademas `CampaignCatalogItem.source` solo admite MOCK/ANALYTICS y `CampaignAudiencePage.source` es texto libre. Requerira una decision de contrato y ajuste de tipos despues de la confirmacion BI, no se altera en esta propuesta.
+
+La consulta de audiencia futura deberia filtrar por un unico load_id, OR entre IDs de una dimension y AND entre dimensiones seleccionadas; Division, Department y Company son obligatorios al programar. Paginacion propuesta keyset con orden estable por clave unica de registro fuente y cursor opaco asociado al load_id; no devolver email ni payload de fuente a Angular. Reglas de deduplicacion por compra/persona y mapeo de customer/email siguen OPEN. DDL asociado: `pec-api/prisma/manual-sql/bi_campaign_staging_proposal.sql`. v0.5 / DRAFT.
+
+| 0.5 | 2026-10-23 | Documenta el mapeo interno candidato, incompatibilidades del port y paginacion propuesta; sin cambios API implementados. DRAFT conservado. |
+
+OPEN de compatibilidad: el ledger de Recipient es unico por compra, pero el contrato BI podria devolver linea/producto; definir unidad de envio y agrupacion antes de adaptar `CampaignRecipientCandidate`. El campo candidato `email` no debe llegar a endpoints Angular; solo serviria dentro del backend con autorizacion de privacidad.
+## Sprint 3.1C.4.1 - identidad de factura y salida de audiencia (APPROVED)
+
+La salida del futuro `CampaignAudienceProvider` debe emitir a lo sumo un candidato por factura elegible y Campaign, con `purchaseSource = invoice_source`, `purchaseExternalId = invoice_external_id` y, tras validar BI, `purchaseIdType = invoice_id_type`. Una factura califica si existe al menos una fila que cumpla la segmentacion y elegibilidad; productos y divisiones repetidos se consolidan en backend antes de exponer la pagina. No devolver lista de productos, email ni IDs de cliente a Angular.
+
+La identidad de factura debe ser par no vacio origen-sistema + ID estable. La deduplicacion es scoped por campaign y compra. El contrato actual de candidato no declara `purchaseIdType`; su incorporacion es un ajuste de API interna futuro, no implementado. Participacion entre distintas Campaigns, contacto, consentimiento y supresion siguen OPEN. v0.5 / DRAFT.
+## Sprint 3.1D - fuente provisional y preview
+
+Se agrego `GET /survey-campaigns/:campaignId/audience-preview`, autorizado como lectura Campaign. Devuelve `source`, `environment`, `snapshotId`, `evaluationDate` y conteos agregados (`eligibleInvoices`, `contactableInvoices`, `missingEmailInvoices`, `invalidEmailInvoices`, `consolidatedRows`); no devuelve email, customer ID, factura ni lineas. La fecha opcional se valida como fecha calendario; si se omite, el backend la calcula usando la zona de Campaign.
+
+El proveedor se selecciona explicitamente con `CAMPAIGN_CATALOG_PROVIDER`, `CAMPAIGN_AUDIENCE_PROVIDER` y `CAMPAIGN_PROVISIONAL_BI_ENABLED`; no hay fallback automatico y `postgres-provisional` se rechaza en produccion. La fuente se reporta `PROVISIONAL_POSTGRES`. Preflight deja proveedor provisional OPEN, audiencia real BLOCKED y mantiene `PROVISIONAL_DATA_SOURCE_NOT_APPROVED`; por tanto no habilita Schedule/Resume. DRAFT conservado.
+
+| 0.5 | 2026-10-23 | Documenta preview agregado y seleccion explicita del proveedor; no expone PII ni habilita lifecycle. |
+
+## Sprint 3.1E - contratos públicos revisados (2026-10-23)
+
+Código observado: `GET /surveys/public/:id/:local?idD=...` es público; `local` se pasa a la validación de establecimiento y `idD` se busca en `sspectcatalog` para obtener la empresa/dispositivo. El submit público es `POST /surveys/:id/results/:local?idD=...`. En Angular, la ruta del módulo es `form/:id`; el componente actual carga mediante `GET /surveys/:id` y guarda mediante `POST /surveys/:id/results`, usando contexto de sesión/local. La URL construida por PEC `PUBLIC_FORM_URL/survey/:id?idD=1` no coincide con esos contratos observados. No se agregaron endpoints ni se modificaron Surveys. El token/submit Campaign sigue OPEN; servicio interno de correlación aislado, aún sin consumidor HTTP.
+## Sprint 3.1F - API de invitaciones individuales (2026-10-23)
+
+- GET /campaign-invitations/:token es público y devuelve únicamente { name, content } tras validar token, expiración, relación Attempt/Campaign/Survey, publicación y vigencia.
+- POST /campaign-invitations/:token/responses recibe { answers: object }; crea SurveyResult y consume el token atómicamente. Devuelve únicamente { status: SAVED }; no expone IDs internos, correo, factura ni Recipient.
+- Token inválido, vencido, consumido o Survey inelegible produce una respuesta genérica.
+- Angular abre /campaign-invitation/:token y reutiliza el componente SurveyJS. El flujo normal permanece igual.
+- La emisión interna del token requiere expiresAt futuro; no se define una duración predeterminada.
+- Las encuestas version 2 se rechazan hasta soportar su efecto lateral de creación de queja. v0.5 / DRAFT.
+
+## Sprint 3.1F.1 - límite de compatibilidad (2026-10-24)
+
+La ruta de respuestas Campaign mantiene el guard de Survey versión 2. La ruta general de Surveys no se modifica. No se certifica todavía la atomicidad PostgreSQL de la correlación; la suite de integración quedó omitida en la ejecución por falta de conexión local verificada. v0.5 / DRAFT.
+## Sprint 3.1F.1 - compatibilidad Survey para API Campaign (2026-10-24)
+
+**APPROVED:** Los flujos Campaign solo aceptan Survey de satisfacción (`version === 1` y `content.isQueja !== true`). Selección y endpoints de invitación rechazan encuestas de queja o versiones no reconocidas; preflight devuelve el bloqueo de compatibilidad y Schedule/Resume lo heredan. Las rutas generales y públicas de Surveys no cambian. La elegibilidad de publicación y vigencia permanece además obligatoria. Concurrencia y rollback PostgreSQL quedan sin validar en esta ejecución. v0.5 / DRAFT.
+## Sprint 3.1G-A - consulta de simulación de ejecución (2026-10-24)
+
+Nuevo endpoint de lectura autenticado/CASL: `GET /survey-campaigns/:campaignId/execution-simulation?evaluationDate=YYYY-MM-DD`. Admite únicamente campañas DRAFT, entorno no productivo, proveedores de catálogo y audiencia `PROVISIONAL_POSTGRES`, lote disponible y checks READY para compatibilidad, publicación y vigencia Survey. Responde `mode=SIMULATION`, snapshot, evaluación, conteos de facturas/invitaciones/correos, referencia y versión de plantilla, HTML de muestra con URL `example.invalid`, efectos laterales en cero y blockers de ejecución productiva. No retorna email, factura, cliente, URL/token individual ni contenido individual preparado. Error de disponibilidad, cambio de snapshot o gate Survey impide la simulación. No modifica contratos de emBlue ni rutas generales de Surveys. v0.5 / DRAFT.
+
+
+## Sprint 3.1G-B - simplificación de conexión Campaign (2026-10-25)
+
+Angular conserva `GET /survey-campaigns/catalogs/:catalog` bajo la autorización `Read Campaign`. En desarrollo, el módulo inyecta automáticamente `CampaignPostgresStagingProvider`; no exige `CAMPAIGN_CATALOG_PROVIDER`, `CAMPAIGN_AUDIENCE_PROVIDER`, `CAMPAIGN_PROVISIONAL_BI_ENABLED` ni `CAMPAIGN_PROVISIONAL_DATABASE_TARGET`. El proveedor continúa usando `DatabaseService` y consulta `bi_integration` explícitamente. Producción y entornos no reconocidos obtienen el proveedor no configurado, nunca MOCK como fallback. Antes de consultar la base, el proveedor exige verificación de la rama Neon autorizada.
+
+Para la validación independiente de rama se requieren solo Project ID, Branch ID, propietario esperado de la base y credencial de API Neon (`CAMPAIGN_PROVISIONAL_NEON_PROJECT_ID`, `CAMPAIGN_PROVISIONAL_NEON_BRANCH_ID`, `CAMPAIGN_PROVISIONAL_NEON_DATABASE_OWNER`, `CAMPAIGN_PROVISIONAL_NEON_API_KEY`). El endpoint se extrae del host de `DATABASE_URL`, y la base y el rol de esa misma URL; estos datos de identidad no seleccionan proveedor ni crean otra conexión. **Registro de revisión:** v0.5, 2026-10-25. Se registra la decisión de conexión única/esquemas separados y selección automática protegida. Estado formal `DRAFT` conservado.
+
+
+## Sprint 3.1G-B.1 - auditoria de configuracion Campaign (2026-10-25)
+
+Inspeccion local de nombres de variables, sin leer ni publicar valores: `pec-api/.env` y `.env.local` contienen `DATABASE_URL` y `ENV`. `AppModule` carga globalmente `.env.local`, `.env.preprod`, `.env.prod` y `.env`; el guard lee `process.env`. No se encontro `DIRECT_URL` ni una identidad Neon reutilizable en esos archivos. `PROJECT_ID_GCS` identifica GCP y `API_KEY_STAR` pertenece a otra integracion; no son sustitutos de identidad Neon. El inventario local no prueba variables inyectadas externamente al proceso desplegado.
+
+En el checkout, `CampaignNeonTargetGuard` aun exige Project ID, Branch ID, propietario esperado y credencial API Neon. Ninguno aparece en los archivos locales. El error 503 se origina al faltar esa configuracion: el guard falla antes de llamar a la API de Neon y antes de leer el lote en `bi_integration`. Endpoint ID, base y rol se derivan del `DATABASE_URL`; no se requiere otra conexion ni un `DIRECT_URL`. No se modifico `DATABASE_URL`.
+
+No se retiro la verificacion de rama: `ENV` distingue el entorno PEC, pero no identifica una rama Neon; el hostname solo permite derivar el endpoint. La verificacion API Project/Branch/Endpoint y la comprobacion SQL posterior (base, esquema, rol, propietario y primary) siguen siendo controles distintos. El mecanismo equivalente no puede configurarse con los datos que hoy existen en los archivos inspeccionados. Dato pendiente para una lectura segura: una fuente confiable, ya disponible para NestJS, que relacione la conexion actual con el Project ID y Branch ID de desarrollo y permita verificar esa relacion en Neon. Hasta resolverlo, la lectura funcional falla cerrada. Los SPECS permanecen v0.5 / DRAFT.
+## Consolidación del contrato de catálogos (2026-10-25)
+
+`GET /survey-campaigns/catalogs/:catalog` usa el proveedor configurado por el módulo Campaign sobre el `DatabaseService` existente y tablas calificadas con el esquema `bi_integration`. Las reglas históricas que requieren `CAMPAIGN_CATALOG_PROVIDER`, `CAMPAIGN_AUDIENCE_PROVIDER`, `CAMPAIGN_PROVISIONAL_BI_ENABLED` o `CAMPAIGN_PROVISIONAL_DATABASE_TARGET` quedan supersedidas. No existe fallback silencioso a MOCK.
+
+El guard actual puede responder con error de servicio no disponible antes de consultar catálogos si la rama Neon no se puede verificar. La API administrativa de Neon no es parte del contrato objetivo del endpoint; retirar esa dependencia requiere primero un control de destino equivalente verificable. Los errores de autorización no deben exponer configuración ni secretos. Estado formal `DRAFT`; versión v0.5.
+
+## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
+
+Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
+
+`GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
+
+Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.
