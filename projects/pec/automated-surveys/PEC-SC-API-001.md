@@ -568,6 +568,14 @@ Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aproba
 
 `SurveyPublicationValidator` es un servicio NestJS del módulo Campaign que lee `status`, `isPublic`, `archived` y `content` de Survey. La publicación se confirma únicamente con `status === 1`, `isPublic === true` y `archived === false`; no hay flujo adicional. El preflight reporta `SURVEY_PUBLICATION` READY/BLOCKED con esta evidencia y `SURVEY_CALENDAR_AVAILABILITY` READY/BLOCKED/OPEN por separado. Schedule y Resume consumen el mismo validador; el gate no utiliza el fallback genérico de Surveys. La URL individual continúa OPEN. Audiencia real, plantilla y catálogos MOCK continúan bloqueando programación. Evidencia local 2026-10-23: 34 pruebas focalizadas aprobadas, build NestJS aprobado y ESLint focalizado aprobado. v0.5 / DRAFT.
 
+## Despacho emBlue masivo manual (2026-10-27)
+
+Se agrega `POST /survey-campaigns/:campaignId/execute-now-bulk`, con el mismo esquema de autorización y confirmación de audiencia que `execute-now`. Agrupa hasta 1.000 correos personalizados por request a `POST /emails/send_bulk`; `execute-now` conserva el envío individual. La respuesta y el ledger conservan conteos por Attempt, referencia de actividad y outcomes ambiguos. No se expone contenido personal en errores resumidos ni se reintentan automáticamente resultados sin correlación individual confirmada.
+
+La invitación utiliza recursos visuales públicos de solo lectura bajo `GET /campaign-assets/email/:name` y el logo del formato activo mediante `GET /campaign-assets/formats/:formatId/logo`. Las rutas no exponen el registro del formato, aceptan únicamente recursos predefinidos e imágenes PNG/JPEG/WebP verificadas por firma, rechazan SVG y contenido desconocido, y responden con `nosniff`, `Content-Disposition: inline` y caché controlada.
+
+La ruta no se invocó al implementar y puede enviar correos reales si se usa. No habilita scheduler/Cron ni cambia las condiciones de Schedule/Resume. El contrato de reconciliación de actividad y errores por destinatario sigue OPEN.
+
 ## Sprint 3.1C.3 - estado de los contratos de proveedor
 
 El contrato HTTP de Campaign sigue siendo el frontend PEC → endpoints Campaign; su abstracción de catálogos es `CampaignCatalogProvider.list/find`. `AnalyticsCampaignCatalogProvider` no implementa I/O y responde con NotImplemented/Unavailable; `CAMPAIGN_CATALOG_PROVIDER=analytics` no constituye conexión real. `CampaignAudienceProvider.resolveEligiblePage` y sus tipos (`segment`, `postPurchaseOffsetDays`, `evaluationDate`, `cursor`, `pageSize`, `purchaseSource`, `purchaseExternalId`, `purchaseDate`, `customerExternalId`, `email`) son una propuesta interna, no un contrato externo. No se verificaron método/path, autenticación, filtros, campos, paginación, límites ni errores Data-Lab. No cambiar Angular/API hasta recibir la especificación real. v0.5 / DRAFT.

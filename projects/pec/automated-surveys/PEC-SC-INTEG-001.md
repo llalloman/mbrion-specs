@@ -146,6 +146,10 @@ PEC prepara un mensaje por compra elegible; puede agruparlos en llamadas por lot
 | `customerName` | Variable opcional. |
 | `companyName` | Variable opcional. |
 | `formatName` | Variable opcional. |
+
+La implementación vigente resuelve `formatName`, `formatId` y disponibilidad de logo desde el formato PEC activo asociado a la factura. El texto y asunto muestran el formato en mayúsculas. El logo no se replica en el payload de emBlue: se referencia mediante una URL pública del API definida por `CAMPAIGN_PUBLIC_API_URL`, evitando Base64 repetido en lotes masivos.
+
+La identidad del remitente se configura mediante `EMBLUE_FROM_EMAIL`, `EMBLUE_FROM_NAME` y `EMBLUE_REPLY_TO`. PEC envía esos valores explícitamente en cada elemento de `/emails/send` y `/emails/send_bulk`; no existe fallback al remitente predeterminado de emBlue. Las tres variables se validan antes del despacho y requieren direcciones previamente autorizadas por el administrador de emBlue.
 | `storeName` | Variable opcional. |
 | `expirationDate` | Variable opcional; significado y cálculo sujetos a regla funcional aprobada. |
 | `surveyName` | Variable opcional. |

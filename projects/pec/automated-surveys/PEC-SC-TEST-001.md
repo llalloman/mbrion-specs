@@ -421,6 +421,10 @@ Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aproba
 
 Pruebas para regla activa/pública/no archivada, inactiva, privada, archivada, genérica privada, fecha disponible futura, fecha vencida, calendario fuera de `availableTo`, configuración incompleta y revalidación al reanudar. También se verifica que enlace individual permanezca OPEN y que audiencia/plantilla/catálogos MOCK sigan bloqueando operaciones. Evidencia local 2026-10-23: 34 pruebas focalizadas aprobadas, build NestJS aprobado y ESLint focalizado aprobado. No se ejecutaron pruebas de integración PostgreSQL, DDL/DML, Cron ni envíos. v0.5 / DRAFT.
 
+## Verificación del despacho masivo manual (2026-10-27)
+
+`EmblueService.sendEmailsBulk()` y `CampaignBulkDispatchService` se verificaron con mocks: payload v2.3, límite de hasta 1.000 elementos, persistencia individual de outcomes, errores parciales sin correlación clasificados como ambiguos, rate limit y duplicados locales rechazados. Ejecución focalizada: 3 suites / 46 pruebas aprobadas; `npm run build` aprobado. No hubo tráfico externo, escrituras PostgreSQL reales ni activación de scheduler/Cron. La aceptación batch no prueba entrega, y la reconciliación con actividad emBlue sigue pendiente.
+
 | 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
 
 ## Sprint 3.1C.3 - aceptación futura de proveedor CF/Data-Lab
@@ -494,6 +498,10 @@ Las pruebas unitarias no demuestran conectividad funcional con Neon. La prueba r
 ## Actualización funcional 2026-10-25 — Fuentes y correspondencia de segmentación
 
 Fuentes implementadas: División, Departamento y Clasificación auxiliar se consultan desde `bi_integration.bi_segmentation_catalog`; Empresa, Formato y Local se consultan desde los modelos activos PEC `sspectenterprise`, `sspectformat` y `sspectestablishment`. Las relaciones PEC verificadas son Formato → Empresa mediante `enterpriseId` y Local → Formato mediante `formatId`. Las compras siguen en `bi_integration.bi_customer_purchases` y se consolidan por `(invoice_source, invoice_external_id)` antes de paginar.
+
+Evidencia local 2026-10-29 para plantilla Campaign: build NestJS aprobado; Campaign 26 suites aprobadas y 3 omitidas, 225 pruebas aprobadas y 28 omitidas. Las pruebas verifican formato en mayúsculas, escape del HTML y URL, uso de la imagen central e iconos aprobados, selección exacta del logo PEC, firmas PNG/JPEG/WebP, rechazo de SVG/contenido desconocido y límite de 2 MB. No se enviaron correos ni se escribieron datos durante esta verificación.
+
+Evidencia local 2026-10-29 para identidad emBlue: 1 suite y 34 pruebas aprobadas, además de build NestJS aprobado. Se verificó que envío individual y bulk incluyan `from { email, name }` y `replyTo`, y que falten de forma segura cuando correo, nombre o Reply-To estén ausentes o sean inválidos. No se efectuaron llamadas reales a emBlue.
 
 El esquema PEC no contiene una columna de mapeo explícita a `company_external_id`, `format_external_id` o `store_external_id` de BI. La implementación solo acepta igualdad textual exacta entre IDs; no compara por nombre/código ni similitud. Si falta igualdad exacta, preview y operaciones dependientes deben bloquearse e informar la correspondencia faltante. Este estado no declara validado el mapeo BI.
 

@@ -718,6 +718,16 @@ Preflight reporta `SURVEY_PUBLICATION=READY` unicamente con la conjuncion aproba
 
 El gate Campaign usa `SurveyPublicationValidator` en preflight y antes de Schedule/Resume. Publicación requiere `status === 1`, `isPublic === true`, `archived === false`; `availableFrom/availableTo`, cuando existan, deben cubrir el calendario inclusivo programado. Una encuesta no elegible bloquea; una ventana inválida o insuficiente también bloquea. La disponibilidad incompleta se informa OPEN. Ninguna de estas verificaciones elimina bloqueos de URL individual, audiencia, plantilla o catálogos MOCK. v0.5 / DRAFT.
 
+## Adaptación emBlue masiva manual (2026-10-27)
+
+Se conserva `POST /survey-campaigns/:campaignId/execute-now` para despacho individual mediante `POST /emails/send`. Se agrega `POST /survey-campaigns/:campaignId/execute-now-bulk`, que recorre la audiencia paginada, prepara contenido personalizado por invitación y agrupa hasta 1.000 mensajes por `POST /emails/send_bulk`, conforme al contrato v2.3 aportado. El API registra cada Attempt y su correlación con la actividad/batch; ante timeout, respuesta no reconocible o errores sin correlación individual, conserva outcomes ambiguos y no reintenta automáticamente para evitar duplicados.
+
+Cada mensaje usa la plantilla visual aprobada, incorpora los recursos gráficos entregados y personaliza nombre/logo del formato de compra. Los recursos se referencian por URL pública para no multiplicar adjuntos o Base64 dentro de lotes de hasta 1.000 mensajes.
+
+El endpoint masivo es una acción manual autenticada que puede enviar correos reales cuando se invoque; no se ejecutó durante esta implementación. No se conectó al scheduler, no se activaron cron jobs y no se afirma entrega final a partir de la aceptación de emBlue. La integración de despacho automático, reconciliación de actividad/entrega, límites de tasa/tamaño del cuerpo y el contrato de errores por destinatario permanecen pendientes de confirmación. La fuente de audiencia provisional sigue sin habilitar Schedule/Resume.
+
+La invitación utiliza un diseño HTML responsive basado en el modelo visual entregado. El agradecimiento muestra el nombre del formato de compra solo cuando las líneas consolidadas de la factura apuntan a un único formato y este resuelve a un formato PEC activo por ID exacto. Si no hay correspondencia inequívoca, usa “nuestro local”; no inventa la marca. La plantilla se escapa antes de interpolar el nombre y enlace. Logo/mascota gráficos quedan pendientes de una URL de imagen pública aprobada para correo; los assets locales del UI no se asumen accesibles desde el destinatario.
+
 | 0.5 | 2026-10-23 | Registra regla Campaign de Survey, gate temporal y cobertura de pruebas; DRAFT conservado. |
 
 ## Sprint 3.1C.3 - condición de fuente de audiencia

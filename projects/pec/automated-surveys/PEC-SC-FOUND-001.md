@@ -655,3 +655,12 @@ El esquema PEC no contiene una columna de mapeo explícita a `company_external_i
 `GET /survey-campaigns/:campaignId/audience-preview?page=N` devuelve conteos de clientes con identificador, facturas elegibles/contactables, registros excluidos por correo ausente/inválido y filas consolidadas. La página contiene etiquetas generadas para cliente/factura y fecha, sin correo, ID de cliente ni identificador real de factura. Preview es de solo lectura. Mantener el estado formal DRAFT y versión 0.5.
 
 Los datos BI persistidos y el seed ya ejecutado no se modificaron. El reemplazo por ejemplos sintéticos representativos (taxonomía general de abarrotes/productos y clientes ficticios) requiere una operación de carga autorizada; no ejecutar ni modificar datos en esta entrega. OPEN: confirmar que los IDs externos BI coinciden con las PK PEC o entregar un mapeo autorizado, además de reglas de contactabilidad/exclusión.
+
+
+### Ajuste de seleccion y experiencia Campaign (2026-10-27, DRAFT)
+
+El selector lista encuestas de satisfaccion activas, publicas, no archivadas y vigentes hoy en America/Guayaquil. Excluye vigencias invalidas, futuras y vencidas; los extremos son inclusivos y los limites ausentes no restringen el periodo. Esta seleccion no depende de completar primero la programacion.
+
+Crear y editar comparten el orden: informacion general, audiencia y compras, programacion, encuesta y guardar. Tras completar el calendario, el selector limita las encuestas vigentes hoy a las que cubren todo el periodo elegido. Si la segmentacion contiene una o varias empresas, el selector muestra solo encuestas cuyo `enterpriseId` coincide textualmente con alguna empresa elegida; sin empresas seleccionadas conserva disponibles las encuestas de todas las empresas. El calendario se contrasta con la vigencia de la encuesta elegida; una asociacion antigua no disponible se informa sin volver a ofrecerla como opcion.
+
+Observar presenta resumen, programacion, filtros plegables, audiencia, incidencias corregibles e historial. Una unica accion de envio manual usa el transporte bulk existente, con confirmacion. El transporte individual permanece en el API. La revision automatica conserva las validaciones del servidor; los diagnosticos de integracion no se exponen como tareas del usuario. No se habilitan cron jobs con este ajuste.
